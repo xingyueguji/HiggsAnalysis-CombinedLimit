@@ -1,0 +1,18 @@
+# Combine outputs
+fitDiagnostics*.root
+higgsCombine*.root
+combine_logger.out
+
+# Rescaled inputs and workspaces
+combine_input*.root
+*_workspace.root
+
+# Plot outputs
+plots_postfit/
+plots/
+
+# ROOT ACLiC build artifacts (in case you ever +'compile macros)
+*_C.d
+*_C.so
+*_C_ACLiC_dict_rdict.pcm
+*.pcm

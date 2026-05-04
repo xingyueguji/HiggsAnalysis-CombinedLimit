@@ -1,0 +1,21 @@
+imax 1
+jmax 3
+kmax *
+------------
+shapes data_obs ch1 combine_input_Zmumu.root data_obs
+shapes signal   ch1 combine_input_Zmumu.root signal
+shapes w        ch1 combine_input_Zmumu.root w
+shapes wtau     ch1 combine_input_Zmumu.root wtau
+shapes ztau     ch1 combine_input_Zmumu.root ztau
+------------
+bin            ch1
+observation    -1
+------------
+bin            ch1     ch1   ch1    ch1
+process        signal  w     wtau   ztau
+process        0       1     2      3
+rate           -1      -1    -1     -1
+------------
+w_rate     rateParam ch1 w     1 [0,20]
+wtau_rate  rateParam ch1 wtau  1 [0,20]
+ztau_rate  rateParam ch1 ztau  1 [0,20]

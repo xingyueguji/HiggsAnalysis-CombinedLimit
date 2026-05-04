@@ -1,0 +1,26 @@
+imax 1
+jmax 4
+kmax *
+------------
+shapes data_obs ch1 combine_input.root data_obs
+shapes signal   ch1 combine_input.root signal
+shapes z        ch1 combine_input.root z
+shapes ztau     ch1 combine_input.root ztau
+shapes wtau     ch1 combine_input.root wtau
+shapes pdfbkg   ch1 combine_input.root pdfbkg
+------------
+bin            ch1
+observation    -1
+------------
+bin            ch1    ch1   ch1    ch1   ch1
+process        signal z     ztau   wtau  pdfbkg
+process        0      1     2      3     4
+rate           -1     -1    -1     -1    -1
+------------
+# Cross-section uncertainties — log-normal multiplicative
+z_norm     lnN  -    1.05  -     -     -
+ztau_norm  lnN  -    -     1.10  -     -
+wtau_norm  lnN  -    -     -     1.10  -
+
+# QCD: data-driven, unknown normalization -> keep free
+pdfbkg_rate rateParam ch1 pdfbkg 1 [0,2000]
