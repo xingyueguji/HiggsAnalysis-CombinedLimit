@@ -19,16 +19,263 @@
 #include <algorithm>
 #include <cmath>
 
-// ----------------------------------------------------------------
-//  Helpers — identical to draw_postfit_inclusive.C
-//  (GetFitPar, RemapToReferenceBinning, MakePullHist,
-//   SaveNicePlot1D_WithBkg_Postfit_Pull)
-//  Copy them verbatim from your W file.
-// ----------------------------------------------------------------
-static double GetFitPar(RooFitResult* fr, const char* name, double& err) { /* ... */ }
-static TH1*   RemapToReferenceBinning(TH1* hIn, TH1* hRef, const char* newName) { /* ... */ }
-static TH1D*  MakePullHist(TH1* hData, TH1* hPost, const char* name = "h_pull") { /* ... */ }
-static void   SaveNicePlot1D_WithBkg_Postfit_Pull(/* same signature, same body */) { /* ... */ }
+static double GetFitPar(RooFitResult* fr, const char* name, double& err) {
+  err = 0.0;
+  if (!fr)
+    return 0.0;
+
+  RooArgList pars = fr->floatParsFinal();
+  RooRealVar* v = dynamic_cast<RooRealVar*>(pars.find(name));
+  if (!v) {
+    std::cerr << "[WARN] Cannot find fit parameter: " << name << "\n";
+    return 0.0;
+  }
+
+  err = v->getError();
+  return v->getVal();
+}
+
+static TH1* RemapToReferenceBinning(TH1* hIn, TH1* hRef, const char* newName) {
+  if (!hIn || !hRef)
+    return nullptr;
+
+  TH1* hOut = dynamic_cast<TH1*>(hRef->Clone(newName));
+  if (!hOut)
+    return nullptr;
+
+  hOut->Reset();
+  hOut->SetDirectory(nullptr);
+
+  const int nIn = hIn->GetNbinsX();
+  const int nRef = hRef->GetNbinsX();
+
+  if (nIn != nRef) {
+    std::cerr << "[WARN] Bin count mismatch in RemapToReferenceBinning: " << nIn << " vs " << nRef << "\n";
+  }
+
+  const int nCopy = std::min(nIn, nRef);
+  for (int ib = 1; ib <= nCopy; ++ib) {
+    hOut->SetBinContent(ib, hIn->GetBinContent(ib));
+    hOut->SetBinError(ib, hIn->GetBinError(ib));
+  }
+
+  return hOut;
+}
+
+static TH1D *MakePullHist(TH1 *hData, TH1 *hPost, const char *name = "h_pull")
+{
+    if (!hData || !hPost)
+        return nullptr;
+
+    TH1D *hPull = dynamic_cast<TH1D *>(hData->Clone(name));
+    if (!hPull)
+        return nullptr;
+
+    hPull->Reset();
+    hPull->SetDirectory(nullptr);
+
+    const int nb = std::min(hData->GetNbinsX(), hPost->GetNbinsX());
+    for (int ib = 1; ib <= nb; ++ib)
+    {
+        const double d  = hData->GetBinContent(ib);
+        const double m  = hPost->GetBinContent(ib);
+        double err      = hData->GetBinError(ib);
+
+        if (err <= 0.0)
+        {
+            // fallback for empty/zero-error bins
+            err = (d > 0.0) ? std::sqrt(d) : 1.0;
+        }
+
+        const double pull = (d - m) / err;
+        hPull->SetBinContent(ib, pull);
+        hPull->SetBinError(ib, 0.0);
+    }
+
+    return hPull;
+}
+
+static void SaveNicePlot1D_WithBkg_Postfit_Pull(
+    TH1 *hData,
+    const std::vector<TH1 *> &bkgs,
+    const std::vector<std::string> &bkgNames,
+    TH1 *hTotal,
+    const std::string &outPathNoExt,
+    const std::string &xTitle,
+    const std::string &yTitle,
+    const std::string &mainTitle,
+    const std::string &subTitle1,
+    const std::string &subTitle2,
+    const std::vector<std::string> &boxLines,
+    const PlotStyle &ps = PlotStyle(),
+    PlotTuner tuner = nullptr)
+{
+    if (!hData || !hTotal)
+        return;
+
+    gStyle->SetOptStat(ps.showStats ? 1110 : 0);
+
+    TCanvas *c = new TCanvas(Form("c_%s_postfit_pull", hData->GetName()), "", ps.w, ps.h);
+
+    // ---------------- top / bottom pads ----------------
+    TPad *pad1 = new TPad("pad1", "pad1", 0.0, 0.25, 1.0, 1.0);
+    TPad *pad2 = new TPad("pad2", "pad2", 0.0, 0.00, 1.0, 0.25);
+
+    pad1->SetLeftMargin(ps.lm);
+    pad1->SetRightMargin(ps.rm);
+    pad1->SetTopMargin(ps.tm);
+    pad1->SetBottomMargin(0.02);
+    pad1->SetTicks(1, 1);
+    pad1->SetLogy(ps.logy);
+
+    pad2->SetLeftMargin(ps.lm);
+    pad2->SetRightMargin(ps.rm);
+    pad2->SetTopMargin(0.03);
+    pad2->SetBottomMargin(0.35);
+    pad2->SetTicks(1, 1);
+
+    c->cd();
+    pad1->Draw();
+    pad2->Draw();
+
+    // ---------------- top pad ----------------
+    pad1->cd();
+
+    THStack *hs = new THStack("hs_postfit_pull", "");
+
+    std::vector<int> colors = {
+        kAzure - 9,
+        kOrange - 3,
+        kGreen + 2,
+        kMagenta - 3,
+        kCyan + 1};
+
+    for (int i = static_cast<int>(bkgs.size()) - 1; i >= 0; --i)
+    {
+        TH1 *b = bkgs[i];
+        if (!b)
+            continue;
+
+        b->SetFillColor(colors[i % colors.size()]);
+        b->SetLineColor(kBlack);
+        b->SetLineWidth(1);
+        hs->Add(b);
+    }
+
+    ApplyHistStyle(hData, ps, xTitle, yTitle);
+    hData->GetXaxis()->SetLabelSize(0.0);
+    hData->GetXaxis()->SetTitleSize(0.0);
+
+    hData->SetMarkerStyle(20);
+    hData->SetMarkerSize(1.2);
+    hData->SetLineColor(kBlack);
+    hData->SetMarkerColor(kBlack);
+
+    hData->Draw("E");
+    hs->Draw("HIST SAME");
+
+    hTotal->SetLineColor(kRed + 1);
+    hTotal->SetLineWidth(3);
+    hTotal->SetFillStyle(0);
+    hTotal->Draw("HIST SAME");
+
+    hData->Draw("E SAME");
+
+    double ymax = hData->GetMaximum();
+    ymax = std::max(ymax, hTotal->GetMaximum());
+    for (auto *b : bkgs)
+    {
+        if (b)
+            ymax = std::max(ymax, b->GetMaximum());
+    }
+    hData->SetMaximum(ps.logy ? 10.25 * ymax : 1.35 * ymax);
+    if (ps.logy)
+        hData->SetMinimum(1.0);
+
+    TLegend *leg = new TLegend(ps.boxX1 + 0.4, ps.boxY1 - 0.22, ps.boxX2 + 0.4, ps.boxY2 - 0.12);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
+    leg->SetTextFont(42);
+    leg->SetTextSize(0.032);
+
+    leg->AddEntry(hData, "Data", "lep");
+    for (size_t i = 0; i < bkgs.size(); ++i)
+    {
+        if (bkgs[i])
+            leg->AddEntry(bkgs[i], bkgNames[i].c_str(), "f");
+    }
+    leg->AddEntry(hTotal, "Postfit total", "l");
+    leg->Draw();
+
+    DrawHeader(ps, mainTitle, subTitle1, subTitle2);
+    DrawInfoBox(ps, boxLines);
+
+    if (tuner)
+        tuner((TCanvas *)pad1, hData);
+
+    CMS_lumi(pad1, 13, 10);
+
+    // ---------------- bottom pad ----------------
+    pad2->cd();
+
+    TH1D *hPull = MakePullHist(hData, hTotal, "h_pull");
+    if (!hPull)
+        return;
+
+    hPull->SetTitle("");
+    hPull->SetMarkerStyle(20);
+    hPull->SetMarkerSize(0.9);
+    hPull->SetLineColor(kBlack);
+    hPull->SetMarkerColor(kBlack);
+
+    hPull->GetYaxis()->SetTitle("Pull");
+    hPull->GetXaxis()->SetTitle(xTitle.c_str());
+
+    hPull->GetXaxis()->SetTitleFont(42);
+    hPull->GetYaxis()->SetTitleFont(42);
+    hPull->GetXaxis()->SetLabelFont(42);
+    hPull->GetYaxis()->SetLabelFont(42);
+
+    hPull->GetXaxis()->SetTitleSize(0.12);
+    hPull->GetYaxis()->SetTitleSize(0.10);
+    hPull->GetXaxis()->SetLabelSize(0.10);
+    hPull->GetYaxis()->SetLabelSize(0.09);
+
+    hPull->GetXaxis()->SetTitleOffset(1.15);
+    hPull->GetYaxis()->SetTitleOffset(0.55);
+
+    hPull->GetYaxis()->CenterTitle(true);
+    hPull->GetYaxis()->SetNdivisions(505);
+    hPull->GetYaxis()->SetRangeUser(-5.0, 5.0);
+
+    hPull->Draw("EP");
+
+    TLine *l0 = new TLine(hPull->GetXaxis()->GetXmin(), 0.0,
+                          hPull->GetXaxis()->GetXmax(), 0.0);
+    l0->SetLineStyle(2);
+    l0->SetLineWidth(2);
+    l0->Draw("SAME");
+
+    TLine *lp2 = new TLine(hPull->GetXaxis()->GetXmin(), 2.0,
+                           hPull->GetXaxis()->GetXmax(), 2.0);
+    TLine *lm2 = new TLine(hPull->GetXaxis()->GetXmin(), -2.0,
+                           hPull->GetXaxis()->GetXmax(), -2.0);
+    lp2->SetLineStyle(3);
+    lm2->SetLineStyle(3);
+    lp2->SetLineColor(kRed + 1);
+    lm2->SetLineColor(kRed + 1);
+    lp2->Draw("SAME");
+    lm2->Draw("SAME");
+
+    c->cd();
+    c->Modified();
+    c->Update();
+
+    c->SaveAs((outPathNoExt + ".png").c_str());
+    c->SaveAs((outPathNoExt + ".pdf").c_str());
+
+    delete c;
+}
 
 // ----------------------------------------------------------------
 //  Main
