@@ -16,6 +16,6 @@ process        signal  w     wtau   ztau
 process        0       1     2      3
 rate           -1      -1    -1     -1
 ------------
-w_rate     rateParam ch1 w     1 [0,20]
-wtau_rate  rateParam ch1 wtau  1 [0,20]
-ztau_rate  rateParam ch1 ztau  1 [0,20]
+w_rate     rateParam ch1 w     0.01 [0,20]
+wtau_rate  rateParam ch1 wtau  0.01 [0,20]
+ztau_rate  rateParam ch1 ztau  0.01 [0,20]
