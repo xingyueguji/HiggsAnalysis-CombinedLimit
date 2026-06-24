@@ -133,6 +133,88 @@ Examples:
 ./run_pO_fits.sh both combined          # only the simultaneous W+Z fits
 ```
 
+## Step 4b — Running the fit on lxplus (split workflow)
+
+Typical split: **build inputs locally** (Steps 1–3, plain ROOT) → **fit on
+lxplus** (Step 4, needs `cmsenv`) → **observables locally** (Steps 5–6). Only two
+small transfers are needed. Set once (adjust to your accounts/paths):
+
+```bash
+LX=zheng@lxplus.cern.ch
+ANA_LX=/afs/cern.ch/user/z/zheng/pO_analysis                  # analysis repo on lxplus
+FORK_LX=/afs/cern.ch/user/z/zheng/HiggsAnalysis-CombinedLimit # combine fork on lxplus (in your CMSSW area)
+```
+
+### PUSH to lxplus (before the fit)
+
+| what | why |
+|------|-----|
+| the **4 structured input files** (`plots/combine_input_{W,Z}.root` + `plots/Elec/combine_input_{W,Z}.root`) | the only data the fit consumes (~300 KB W + ~7 KB Z each) |
+| the **5 fit scripts** (`run_pO_fits.sh`, `my_script/{make_pO_datacards.sh,extract_pO_yields.C,draw_postfit_pO.C,plotting_helper.C}`) | the pipeline code (via git is cleanest) |
+
+You do **NOT** push `ngen.root`, the ABCD QCD templates, or the skim ntuples —
+those were only needed to *build* the inputs in Step 3, done locally.
+
+```bash
+# (1) inputs -- preserve the plots/ + plots/Elec/ layout so the driver autodetects them
+cd pO_analysis/plotting
+rsync -avR \
+  plots/combine_input_W.root      plots/combine_input_Z.root \
+  plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root \
+  "$LX:$ANA_LX/plotting/"
+
+# (2) scripts -- via git (recommended)
+cd ../../HiggsAnalysis-CombinedLimit
+git add test/run_pO_fits.sh test/my_script/make_pO_datacards.sh \
+        test/my_script/extract_pO_yields.C test/my_script/draw_postfit_pO.C \
+        test/my_script/plotting_helper.C
+git commit -m "pO rapidity-binned W/Z fit pipeline"
+git push origin zheng/po-analysis
+ssh "$LX" "cd $FORK_LX && git checkout zheng/po-analysis && git pull"
+#   ... or scp them if you don't want to commit yet:
+# rsync -av test/run_pO_fits.sh "$LX:$FORK_LX/test/"
+# rsync -av test/my_script/make_pO_datacards.sh test/my_script/extract_pO_yields.C \
+#           test/my_script/draw_postfit_pO.C test/my_script/plotting_helper.C \
+#           "$LX:$FORK_LX/test/my_script/"
+```
+(`CMS_lumi.C`/`.h` are unchanged and already in the fork checkout — no need to send.)
+
+### FIT on lxplus
+
+```bash
+ssh "$LX"
+cd <your CMSSW>/src && cmsenv          # combine + text2workspace.py on PATH
+cd $FORK_LX/test
+PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all
+#   (PO_PLOTS is also autodetected when pO_analysis sits at the standard AFS path.)
+```
+
+### DOWNLOAD back (for the observables)
+
+Only the small `summary/` dirs are needed downstream (fitted-yield histos + CSVs).
+The bulky `fits/` FitDiagnostics outputs can stay on lxplus.
+
+| what | why |
+|------|-----|
+| `pO_fit_out/<chan>/summary/<chan>_fitted_yields.root` | input to `charge_asym.C` / `FBratio.C` |
+| `pO_fit_out/<chan>/summary/<chan>_W_yields.csv`, `<chan>_summary.csv` | yields for cross-sections / inspection |
+| `pO_fit_out/<chan>/postfit/*` *(optional)* | to eyeball the postfit plots |
+
+```bash
+cd HiggsAnalysis-CombinedLimit/test          # your LOCAL fork
+for c in mu ele; do
+  mkdir -p pO_fit_out/$c/summary pO_fit_out/$c/postfit
+  rsync -av "$LX:$FORK_LX/test/pO_fit_out/$c/summary/"  pO_fit_out/$c/summary/
+  rsync -av "$LX:$FORK_LX/test/pO_fit_out/$c/postfit/"  pO_fit_out/$c/postfit/   # optional
+done
+```
+
+Then run Step 6 locally pointing at the downloaded `*_fitted_yields.root`.
+
+> Alternative: run **everything** on lxplus (repoint the skim to EOS per the
+> analysis README's "Input data", then Steps 1–6 all remote) — nothing needs
+> transferring; you'd only copy back the final plots to look at them.
+
 ## Step 5 — Outputs
 
 ```
