@@ -19,9 +19,34 @@
 #include "TFile.h"
 #include "TH1.h"
 #include "TString.h"
+#include "TMath.h"
+#include "RooFitResult.h"
+#include "RooRealVar.h"
+#include "RooArgList.h"
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <cmath>
+
+// Poisson (Baker-Cousins) chi2 between data and the postfit total: well-defined
+// at low/zero counts (unlike Pearson). Empty (no data, no model) bins are
+// skipped; nbinsUsed feeds ndf = nbinsUsed - n_floating_params.
+static double BakerCousinsChi2(TH1 *d, TH1 *t, int &nbinsUsed) {
+  nbinsUsed = 0;
+  double chi2 = 0.0;
+  const int n = std::min(d->GetNbinsX(), t->GetNbinsX());
+  for (int i = 1; i <= n; ++i) {
+    double di = d->GetBinContent(i);
+    double ti = t->GetBinContent(i);
+    if (ti <= 1e-9 && di <= 0.0) continue; // no information in this bin
+    if (ti < 1e-9) ti = 1e-9;              // floor to keep the log finite
+    double term = ti - di;
+    if (di > 0.0) term += di * std::log(di / ti);
+    chi2 += 2.0 * term;
+    ++nbinsUsed;
+  }
+  return chi2;
+}
 
 static TH1D *RemapToRef(TH1 *ref, TH1 *src, const char *nm) {
   if (!ref || !src) return 0;
@@ -74,15 +99,40 @@ void draw_postfit_pO(const char *fitDiagFile,
   std::vector<std::string> names;
   for (size_t i = 0; i < procs.size(); ++i) {
     TH1 *src = (TH1 *)ff->Get(TString::Format("shapes_fit_s/%s/%s", fitChannel, procs[i].c_str()));
+    if (!src && i == 0) // signal slot: the simultaneous W+Z fit renames the Z signal 'zsig'
+      src = (TH1 *)ff->Get(TString::Format("shapes_fit_s/%s/zsig", fitChannel));
     TH1D *h = RemapToRef(ref, src, TString::Format("postfit_%s", procs[i].c_str()));
     if (h) { bkgs.push_back(h); names.push_back(labels[i]); }
   }
   TH1 *tot = (TH1 *)ff->Get(TString::Format("shapes_fit_s/%s/total", fitChannel));
   TH1D *hTot = RemapToRef(ref, tot, "postfit_total");
 
+  // ---- fit-quality diagnostics shown on the plot ----
   std::vector<std::string> box = {
       Form("Data: %.0f", hData->Integral()),
       Form("Postfit total: %.0f", hTot ? hTot->Integral() : 0.0)};
+
+  RooFitResult *fr = (RooFitResult *)ff->Get("fit_s");
+  if (hTot) {
+    int nUsed = 0;
+    const double chi2 = BakerCousinsChi2(hData, hTot, nUsed); // Poisson GoF
+    const int nfloat = fr ? fr->floatParsFinal().getSize() : 0;
+    int ndf = nUsed - nfloat;
+    if (ndf < 1) ndf = (nUsed > 0 ? nUsed : 1);
+    box.push_back(Form("#chi^{2}/ndf = %.1f/%d = %.2f (p=%.2f)",
+                       chi2, ndf, chi2 / ndf, TMath::Prob(chi2, ndf)));
+  }
+  if (fr) {
+    RooRealVar *rv = (RooRealVar *)fr->floatParsFinal().find("r");
+    const bool bad = (fr->status() != 0 || fr->covQual() < 3); // not converged / bad covariance
+    if (rv)
+      box.push_back(bad
+        ? Form("r = %.3f #pm %.3f  #color[2]{(status %d, covQ %d)}",
+               rv->getVal(), rv->getError(), fr->status(), fr->covQual())
+        : Form("r = %.3f #pm %.3f", rv->getVal(), rv->getError()));
+    else if (bad)
+      box.push_back(Form("#color[2]{fit status %d, covQ %d}", fr->status(), fr->covQual()));
+  }
 
   PlotStyle ps;
   ps.drawOpt = "hist";

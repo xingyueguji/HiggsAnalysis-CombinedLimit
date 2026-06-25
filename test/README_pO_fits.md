@@ -55,6 +55,24 @@ summary}`. Per-region failures are logged and skipped (not fatal).
 
 All templates are absolutely normalized (`k_s = A·σ·L/N_gen`) — no area norm.
 
+## Diagnosing fit quality
+
+Each postfit plot (`draw_postfit_pO.C`) now prints, in the top-right info box:
+- `#chi^{2}/ndf = … (p=…)` — Poisson (Baker-Cousins) goodness-of-fit of data vs
+  the postfit total, robust at low counts (ndf = bins used − floating params).
+  χ²/ndf ≈ 1 and a non-tiny p mean good agreement.
+- `r = … ± …` — the fitted signal strength for that region.
+- a **red** `status N, covQ M` only when the fit did **not** converge cleanly
+  (want `status 0`, `covQ 3` = full accurate covariance) — absence of red = OK.
+
+Deeper checks (beyond the plot):
+- `pO_fit_out/<chan>/fits/<region>/fit.log` — the combine log (warnings, MINUIT).
+- `fitDiagnostics_<region>.root` — `fit_s` (`RooFitResult`: `status()`,
+  `covQual()`, `edm()`); nuisance pulls via
+  `python diffNuisances.py fitDiagnostics_<region>.root`.
+- rigorous GoF p-value with toys:
+  `combine -M GoodnessOfFit <ws> --algo saturated -t 200` (+ the same on data).
+
 ## lxplus
 `./sync_lxplus.sh upload` (4 inputs + scripts → lxplus), fit there, then
 `./sync_lxplus.sh download [--postfit]`. Defaults:
