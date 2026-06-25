@@ -53,6 +53,11 @@ struct PlotStyle
     // box (NDC)
     double boxX1 = 0.55, boxY1 = 0.42, boxX2 = 0.93, boxY2 = 0.88;
 
+    // legend rectangle (NDC) for SaveNicePlot1D_WithBkg; <0 -> auto = derived
+    // from the info box (boxX1, boxY1-0.2, boxX2, boxY2-0.2). Set explicitly to
+    // decouple the legend from the info box (e.g. legend lower-right on postfit).
+    double legX1 = -1, legY1 = -1, legX2 = -1, legY2 = -1;
+
     // axis sizes
     double xTitleSize = 0.045, yTitleSize = 0.045;
     double xLabelSize = 0.040, yLabelSize = 0.040;
@@ -651,7 +656,11 @@ static void SaveNicePlot1D_WithBkg(
     //--------------------------------------------------
     // 5️⃣ Legend
     //--------------------------------------------------
-    TLegend *leg = new TLegend(ps.boxX1, ps.boxY1 - 0.2, ps.boxX2, ps.boxY2 - 0.2);
+    const bool legAuto = (ps.legX1 < 0);
+    TLegend *leg = new TLegend(legAuto ? ps.boxX1 : ps.legX1,
+                               legAuto ? ps.boxY1 - 0.2 : ps.legY1,
+                               legAuto ? ps.boxX2 : ps.legX2,
+                               legAuto ? ps.boxY2 - 0.2 : ps.legY2);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
 

@@ -122,8 +122,8 @@ postfit_region() {  # $1=region(label/fitChannel) $2=fits $3=post $4=absW $5=abs
     Z_incl)
       root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Z_incl\",\"$AZ\",\"Z_incl\",\"$POST/$R\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"$R (postfit)\",false)" >/dev/null 2>&1 ;;
     WZ)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Wincl\",\"$AW\",\"W_incl\",\"$POST/WZ_Wincl\",\"PF MET (GeV)\",\"Events / 2.0 GeV\",\"$WL\",\"W+Z combined: W (postfit)\",true)"  >/dev/null 2>&1
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Zincl\",\"$AZ\",\"Z_incl\",\"$POST/WZ_Zincl\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"W+Z combined: Z (postfit)\",false)" >/dev/null 2>&1 ;;
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Wincl\",\"$AW\",\"W_incl\",\"$POST/WZ_Wincl\",\"PF MET (GeV)\",\"Events / 2.0 GeV\",\"$WL\",\"W+Z fit (postfit)\",true)"  >/dev/null 2>&1
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Zincl\",\"$AZ\",\"Z_incl\",\"$POST/WZ_Zincl\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"W+Z fit (postfit)\",false)" >/dev/null 2>&1 ;;
     *)
       root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$R\",\"$AW\",\"$R\",\"$POST/$R\",\"PF MET (GeV)\",\"Events / 2.0 GeV\",\"$WL\",\"$R (postfit)\",true)" >/dev/null 2>&1 ;;
   esac

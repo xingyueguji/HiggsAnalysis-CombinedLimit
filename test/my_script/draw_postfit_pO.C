@@ -119,8 +119,7 @@ void draw_postfit_pO(const char *fitDiagFile,
     const int nfloat = fr ? fr->floatParsFinal().getSize() : 0;
     int ndf = nUsed - nfloat;
     if (ndf < 1) ndf = (nUsed > 0 ? nUsed : 1);
-    box.push_back(Form("#chi^{2}/ndf = %.1f/%d = %.2f (p=%.2f)",
-                       chi2, ndf, chi2 / ndf, TMath::Prob(chi2, ndf)));
+    box.push_back(Form("#chi^{2}/ndf = %.2f, p = %.2f", chi2 / ndf, TMath::Prob(chi2, ndf)));
   }
   if (fr) {
     RooRealVar *rv = (RooRealVar *)fr->floatParsFinal().find("r");
@@ -138,8 +137,13 @@ void draw_postfit_pO(const char *fitDiagFile,
   ps.drawOpt = "hist";
   ps.showStats = false;
   ps.logy = isW;            // log-y for the MET tails; linear for the Z peak
-  ps.boxY1 = 0.62; ps.boxY2 = 0.82;
   ps.normBkgToData = false; // ABSOLUTE postfit yields -- never area-normalize
+  ps.headerX = 0.56;        // channel header shifted left so it fits in-frame
+  ps.boxTextSize = 0.028;   // smaller fit-result / info text
+  ps.boxX1 = 0.56; ps.boxX2 = 0.93; // info box upper-right, contained in the frame
+  ps.boxY1 = 0.56; ps.boxY2 = 0.76; // sits below the header
+  ps.legX1 = 0.70; ps.legY1 = 0.15; // legend -> lower-right (away from the box)
+  ps.legX2 = 0.93; ps.legY2 = 0.48;
   PlotTuner tuner = [&](TCanvas *c, TH1 *h) {
     (void)c; if (!h) return;
     if (ps.logy) h->SetMinimum(1.0);

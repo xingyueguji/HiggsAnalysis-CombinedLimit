@@ -58,12 +58,14 @@ process  signal    z       ztau    wtau    qcd
 process  0         1       2       3       4
 rate     -1        -1      -1      -1      -1
 ------------
-# EWK MC backgrounds: relative composition LOCKED (absolute k_s templates),
-# ONE shared overall normalization parameter.
-ewk_norm rateParam ${R} z    1 [0,5]
-ewk_norm rateParam ${R} ztau 1 [0,5]
-ewk_norm rateParam ${R} wtau 1 [0,5]
-# Data-driven ABCD QCD: free normalization.
+# ALL MC (signal + EWK z/ztau/wtau) share ONE normalization = the POI 'r':
+# the relative composition is FIXED by the absolute k_s cross-section templates,
+# only the overall MC scale floats. 'signal' (index 0) is scaled by r; reusing
+# the name 'r' as a rateParam ties the EWK backgrounds to that SAME r.
+r        rateParam ${R} z    1
+r        rateParam ${R} ztau 1
+r        rateParam ${R} wtau 1
+# Data-driven ABCD QCD: its own free normalization.
 qcd_norm rateParam ${R} qcd  1 [0,10]
 EOF
 }
@@ -90,10 +92,11 @@ process  signal    w       wtau    ztau
 process  0         1       2       3
 rate     -1        -1      -1      -1
 ------------
-# Z backgrounds (tiny in the peak): one shared overall scale.
-zbkg_norm rateParam Z_incl w    1 [0,10]
-zbkg_norm rateParam Z_incl wtau 1 [0,10]
-zbkg_norm rateParam Z_incl ztau 1 [0,10]
+# ALL Z MC (signal + w/wtau/ztau) share ONE normalization = the POI 'r'
+# (relative composition fixed by the absolute cross sections).
+r rateParam Z_incl w    1
+r rateParam Z_incl wtau 1
+r rateParam Z_incl ztau 1
 EOF
 }
 
@@ -129,18 +132,17 @@ process  signal   z       ztau    wtau    qcd      zsig    w       wtau    ztau
 process  0        1       2       3       4        5       6       7       8
 rate     -1       -1      -1      -1      -1       -1      -1      -1      -1
 ------------
-# Shared lepton-efficiency x luminosity scale on BOTH signals (Z pins it).
+# Shared lepton-eff x lumi scale on ALL MC in BOTH channels (signal + every MC
+# background): fixes the relative MC composition; the high-purity Z peak pins it.
 eff_lumi  rateParam * signal 1 [0,5]
 eff_lumi  rateParam * zsig   1 [0,5]
-# W EWK backgrounds (locked ratio, one scale) + data-driven QCD (free).
-ewk_norm  rateParam Wincl z    1 [0,5]
-ewk_norm  rateParam Wincl ztau 1 [0,5]
-ewk_norm  rateParam Wincl wtau 1 [0,5]
-qcd_norm  rateParam Wincl qcd  1 [0,10]
-# Z backgrounds (tiny).
-zbkg_norm rateParam Zincl w    1 [0,10]
-zbkg_norm rateParam Zincl wtau 1 [0,10]
-zbkg_norm rateParam Zincl ztau 1 [0,10]
+eff_lumi  rateParam Wincl z  1 [0,5]
+eff_lumi  rateParam Zincl w  1 [0,5]
+eff_lumi  rateParam * wtau   1 [0,5]
+eff_lumi  rateParam * ztau   1 [0,5]
+# W cross-section deviation: the POI 'r' is an EXTRA scale on the W signal only
+# (signal index 0 -> scaled by r*eff_lumi). Data-driven QCD: its own free param.
+qcd_norm  rateParam Wincl qcd 1 [0,10]
 EOF
 }
 

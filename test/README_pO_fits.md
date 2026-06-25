@@ -46,12 +46,15 @@ summary}`. Per-region failures are logged and skipped (not fatal).
 - `sync_lxplus.sh` — `upload` inputs+scripts / `download` results, one SSH auth.
 
 ## Fit model
-- `signal` → POI `r` (per-region W yield). Discriminant = **PF MET shape**.
-- EWK `z/ztau/wtau` → one shared `ewk_norm` rateParam (relative MC composition
-  LOCKED; overall EWK scale floats).
-- ABCD `qcd` → free `qcd_norm`.
-- Combined `WZ`: shared `eff_lumi` multiplies W `signal` + Z `zsig`; the Z peak
-  pins it (cancels in W/Z ratios). Sanity-check `eff_lumi ≈ 1` afterwards.
+- **All MC (signal + EWK `z/ztau/wtau`) share ONE scale = the POI `r`** — relative
+  composition LOCKED by the absolute `k_s` templates, only the overall MC norm
+  floats. Done by reusing `r` as a `rateParam` on the EWK backgrounds (signal is
+  index 0 → `r` scales it; the rateParam ties the rest to the same `r`). Fitted W
+  yield = `r`×signal-prefit. Discriminant = **PF MET shape**.
+- ABCD `qcd` → its own free `qcd_norm`.
+- Combined `WZ`: shared `eff_lumi` multiplies **all MC in both channels** (fixes
+  the relative composition; the Z peak pins it); `r` is an extra scale on the W
+  signal only. Sanity-check `eff_lumi ≈ 1` afterwards.
 
 All templates are absolutely normalized (`k_s = A·σ·L/N_gen`) — no area norm.
 
