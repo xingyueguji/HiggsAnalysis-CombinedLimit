@@ -69,12 +69,13 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
   TString yieldsRoot = TString::Format("%s/%s_fitted_yields.root", outDir, chan);
   TFile *fy = TFile::Open(yieldsRoot, "RECREATE");
   auto makeYieldHist = [&](const TString &name, double y, double e) {
-    TH1D *h = new TH1D(name, name, 1, 0.0, 1.0);
+    fy->cd();                               // readFit() opens/closes files in the loop, so
+    TH1D *h = new TH1D(name, name, 1, 0.0, 1.0); // make fy current before creating/writing
     h->Sumw2();
     h->SetBinContent(1, y);
     h->SetBinError(1, e);
     h->SetDirectory(fy);
-    h->Write(name, TObject::kOverwrite);
+    fy->WriteTObject(h, name, "Overwrite"); // write to fy explicitly, NOT gDirectory
   };
 
   std::ofstream csv(TString::Format("%s/%s_W_yields.csv", outDir, chan).Data());

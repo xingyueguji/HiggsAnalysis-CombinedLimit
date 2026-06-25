@@ -89,6 +89,7 @@ upload_scripts() {
   run "$FORK_LOCAL/test/run_pO_fits.sh" "$LX:$FORK_LX/test/" || err=1
   run "$FORK_LOCAL/test/my_script/make_pO_datacards.sh" \
       "$FORK_LOCAL/test/my_script/extract_pO_yields.C" \
+      "$FORK_LOCAL/test/my_script/make_yields_from_csv.C" \
       "$FORK_LOCAL/test/my_script/draw_postfit_pO.C" \
       "$FORK_LOCAL/test/my_script/plotting_helper.C" \
       "$FORK_LOCAL/test/my_script/CMS_lumi.C" \
