@@ -357,28 +357,11 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
 
     ApplyGraphStyle(g, ps, xTitle, yTitle);
 
+    g->SetMarkerStyle(20);
+    g->SetMarkerSize(1.2);
+    g->SetMarkerColor(kBlack);
+    g->SetLineColor(kBlack);
     g->Draw(ps.drawOptGraph.c_str());
-
-    // --- Clone graph to show 2x statistics (errors / sqrt(2)) ---
-    TGraphErrors *g_stat2x = (TGraphErrors *)g->Clone(Form("%s_stat2x", g->GetName()));
-
-    const double scale = 1.0 / 1.4; // ~1/sqrt(2)
-
-    for (int i = 0; i < g_stat2x->GetN(); ++i)
-    {
-        double ex = g_stat2x->GetErrorX(i);
-        double ey = g_stat2x->GetErrorY(i);
-
-        g_stat2x->SetPointError(i, 0, ey * scale);
-    }
-
-    // style: only draw error bars, different color
-    g_stat2x->SetLineColor(kRed + 1);
-    g_stat2x->SetMarkerSize(0); // hide markers
-    g_stat2x->SetLineWidth(3);
-
-    // draw only the error bars
-    g_stat2x->Draw("E SAME");
 
     DrawHeader(ps, mainTitle, subTitle1, subTitle2);
     DrawInfoBox(ps, boxLines);
@@ -388,74 +371,33 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
 
     CMS_lumi(c, 13, 10);
 
-    if (g1)
+    // --- all four nPDF model predictions as translucent error bands ---
+    // (order matches observables.C: g1=EPPS21, g2=nCTEQ15HQ, g3=nNNPDF3.0, g4=TUJU21nlo)
+    TGraphErrors *models[4] = {g1, g2, g3, g4};
+    const int     mcol[4]   = {kAzure - 2, kGreen + 2, kOrange + 1, kViolet + 1};
+    const char   *mname[4]  = {"EPPS21", "nCTEQ15HQ", "nNNPDF3.0", "TUJU21nlo"};
+    for (int i = 0; i < 4; ++i)
     {
-
-        g1->SetFillColorAlpha(kBlue, 0.35); // translucent band
-        g1->SetFillStyle(1001);             // solid fill
-        g1->SetMarkerSize(0);               // hide points
-        g1->SetMarkerStyle(0);              // hide markers
-        g1->SetLineWidth(0);                // hide error bar stems
-
-        g1->Draw("3");      // A = draw axes, 3 = filled error band
-        g1->Draw("L SAME"); // draw central line on top
-    }
-    if (g2)
-    {
-
-        g2->SetFillColorAlpha(kGreen, 0.35); // translucent band
-        g2->SetFillStyle(1001);              // solid fill
-        g2->SetMarkerSize(0);                // hide points
-        g2->SetMarkerStyle(0);               // hide markers
-        g2->SetLineWidth(0);                 // hide error bar stems
-
-        // nCTEQ15HQ: kept available but not drawn (see legend below)
-        // g2->Draw("3");      // A = draw axes, 3 = filled error band
-        // g2->Draw("L SAME"); // draw central line on top
-    }
-    if (g3)
-    {
-
-        g3->SetFillColorAlpha(kOrange, 0.35); // translucent band
-        g3->SetFillStyle(1001);               // solid fill
-        g3->SetMarkerSize(0);                 // hide points
-        g3->SetMarkerStyle(0);                // hide markers
-        g3->SetLineWidth(0);                  // hide error bar stems
-
-        g3->Draw("3");      // A = draw axes, 3 = filled error band
-        g3->Draw("L SAME"); // draw central line on top
+        TGraphErrors *gm = models[i];
+        if (!gm) continue;
+        gm->SetFillColorAlpha(mcol[i], 0.35); // translucent band
+        gm->SetFillStyle(1001);
+        gm->SetLineWidth(0); // band ONLY -- no central line, no error bars
+        gm->SetMarkerSize(0);
+        gm->SetMarkerStyle(0);
+        gm->Draw("3");       // filled band only
     }
 
-    if (g4)
-    {
+    g->Draw("P SAME"); // data points back on top of the bands
 
-        g4->SetFillColorAlpha(kRed, 0.35); // translucent band
-        g4->SetFillStyle(1001);            // solid fill
-        g4->SetMarkerSize(0);              // hide points
-        g4->SetMarkerStyle(0);             // hide markers
-        g4->SetLineWidth(0);               // hide error bar stems
-
-        // TUJU21nlo: kept available but not drawn (see legend below)
-        // g4->Draw("3");      // A = draw axes, 3 = filled error band
-        // g4->Draw("L SAME"); // draw central line on top
-    }
-
-    TLegend *leg = new TLegend(0.20, 0.15, 0.45, 0.38);
+    TLegend *leg = new TLegend(0.20, 0.15, 0.45, 0.40);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
     leg->SetTextFont(42);
-    leg->SetTextSize(0.035);
-
-    // --- Data: points ---
+    leg->SetTextSize(0.033);
     leg->AddEntry(g, "Data", "p");
-    leg->AddEntry(g_stat2x, "Projection with Electrons", "l");
-
-    // --- Models: error bands ---
-    leg->AddEntry(g1, "EPPS21", "f");
-    // leg->AddEntry(g2, "nCTEQ15HQ", "f");
-    leg->AddEntry(g3, "nNNPDF3.0", "f");
-    // leg->AddEntry(g4, "TUJU21nlo", "f");
-
+    for (int i = 0; i < 4; ++i)
+        if (models[i]) leg->AddEntry(models[i], mname[i], "f");
     leg->Draw();
 
     c->RedrawAxis(); // redraw frame + ticks on top of the filled error bands
@@ -465,6 +407,86 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
     c->SaveAs((outPathNoExt + ".png").c_str());
     c->SaveAs((outPathNoExt + ".pdf").c_str());
 
+    delete c;
+}
+
+// Overlay TWO data graphs (e.g. muon vs electron) on the same axes, with the
+// shared nPDF theory error bands. g1..g4 are the (flavour-universal) model
+// graphs in the same order as SaveNiceGraph_ErrorBand; pass them null for a
+// data-only overlay (e.g. the charge asymmetry, which has no theory bands here).
+static void SaveNiceGraph_ErrorBand_TwoData(TGraphErrors *gA, const std::string &labelA,
+                                            TGraphErrors *gB, const std::string &labelB,
+                                            const std::string &outPathNoExt,
+                                            const std::string &xTitle,
+                                            const std::string &yTitle,
+                                            const std::string &mainTitle,
+                                            const std::string &subTitle1,
+                                            const std::string &subTitle2,
+                                            const std::vector<std::string> &boxLines,
+                                            const PlotStyle &ps = PlotStyle(),
+                                            GraphTuner tuner = nullptr,
+                                            TGraphErrors *g1 = nullptr,
+                                            TGraphErrors *g2 = nullptr,
+                                            TGraphErrors *g3 = nullptr,
+                                            TGraphErrors *g4 = nullptr)
+{
+    if (!gA && !gB)
+        return;
+
+    gStyle->SetOptStat(ps.showStats ? 1110 : 0);
+    TGraphErrors *base = gA ? gA : gB; // defines the frame
+    TCanvas *c = new TCanvas(Form("c_ovl_%s", base->GetName()), "", ps.w, ps.h);
+    ApplyCanvasStyle(c, ps);
+    c->cd();
+
+    ApplyGraphStyle(base, ps, xTitle, yTitle);
+    // data A (e.g. muon): black circles ; data B (e.g. electron): red squares
+    if (gA) { gA->SetMarkerStyle(20); gA->SetMarkerSize(1.2); gA->SetMarkerColor(kBlack); gA->SetLineColor(kBlack); }
+    if (gB) { gB->SetMarkerStyle(21); gB->SetMarkerSize(1.2); gB->SetMarkerColor(kRed + 1); gB->SetLineColor(kRed + 1); }
+
+    base->Draw(ps.drawOptGraph.c_str()); // axes + first data graph
+    DrawHeader(ps, mainTitle, subTitle1, subTitle2);
+    DrawInfoBox(ps, boxLines);
+    if (tuner)
+        tuner(c, base);
+    CMS_lumi(c, 13, 10);
+
+    // shared theory bands (same order/colours/names as SaveNiceGraph_ErrorBand)
+    TGraphErrors *models[4] = {g1, g2, g3, g4};
+    const int     mcol[4]   = {kAzure - 2, kGreen + 2, kOrange + 1, kViolet + 1};
+    const char   *mname[4]  = {"EPPS21", "nCTEQ15HQ", "nNNPDF3.0", "TUJU21nlo"};
+    for (int i = 0; i < 4; ++i)
+    {
+        TGraphErrors *gm = models[i];
+        if (!gm) continue;
+        gm->SetFillColorAlpha(mcol[i], 0.35);
+        gm->SetFillStyle(1001);
+        gm->SetLineWidth(0); // band ONLY -- no central line, no error bars
+        gm->SetMarkerSize(0);
+        gm->SetMarkerStyle(0);
+        gm->Draw("3");
+    }
+
+    // data points on top of the bands
+    if (gA) gA->Draw("P SAME");
+    if (gB) gB->Draw("P SAME");
+
+    TLegend *leg = new TLegend(0.20, 0.15, 0.47, 0.42);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
+    leg->SetTextFont(42);
+    leg->SetTextSize(0.032);
+    if (gA) leg->AddEntry(gA, labelA.c_str(), "p");
+    if (gB) leg->AddEntry(gB, labelB.c_str(), "p");
+    for (int i = 0; i < 4; ++i)
+        if (models[i]) leg->AddEntry(models[i], mname[i], "f");
+    leg->Draw();
+
+    c->RedrawAxis();
+    c->Modified();
+    c->Update();
+    c->SaveAs((outPathNoExt + ".png").c_str());
+    c->SaveAs((outPathNoExt + ".pdf").c_str());
     delete c;
 }
 

@@ -1,312 +1,68 @@
-# pO W/Z Combine fits — runbook
+# pO W/Z Combine fits — fit-stage reference
 
-End-to-end recipe for the rapidity-binned (+ FB) and simultaneous W/Z Combine
-fits. The pipeline spans **two repos**:
+> **The full end-to-end runbook lives in the analysis repo:
+> `pO_analysis/README.md`** (skim → MC norm → ABCD QCD → structured Combine
+> inputs → **fit (this stage = Module 4)** → fitted yields → observables).
+> This file is just the fit-stage quick reference; see Module 4 there for the
+> whole procedure, the lxplus split workflow, and how the outputs feed
+> `charge_asym.C` / `FBratio.C` / `observables.C`.
 
-| repo | role | needs |
-|------|------|-------|
-| `pO_analysis` (the analysis repo) | makes the skims, ABCD QCD, and the **structured Combine inputs** | ROOT (any recent; tested 6.32) |
-| `HiggsAnalysis-CombinedLimit` (this fork, branch `zheng/po-analysis`) | runs the fits, extracts yields, draws postfit plots | **`cmsenv`** (combine + text2workspace.py) |
+Branch: all pO code is on `zheng/po-analysis` (`main` is stock Combine —
+`git checkout zheng/po-analysis` first). The fit needs `cmsenv`
+(`combine` + `text2workspace.py` on `PATH`).
 
-> Branch check: this fork's `main` is stock Combine. All pO code lives on
-> `zheng/po-analysis` — `git checkout zheng/po-analysis` first.
-
-The fit step is the only one that needs `cmsenv`. Everything upstream is plain
-ROOT and can be done on the same machine or on lxplus; just make sure the
-`combine_input_*.root` files are visible from wherever you run `combine`.
-
----
-
-## TL;DR
-
-```bash
-# --- in pO_analysis (plain ROOT) ---
-cd pO_analysis/skim       && ./run_all.sh all && ./run_ngen.sh           # 1. skims + N_gen
-cd ../correction          && root -l -q 'qcd_abcd.C+' && root -l -q 'qcd_abcd.C+(true)'   # 2. ABCD QCD (mu, ele)
-cd ../plotting            && for a in 'mtandmet.C+(false)' 'mtandmet.C+(true)' \
-                                       'dileptonpeak.C+(false)' 'dileptonpeak.C+(true)'; do \
-                              root -l -q -b "$a"; done                    # 3. structured Combine inputs
-
-# --- in the Combine fork (cmsenv!) ---
-cd HiggsAnalysis-CombinedLimit/test
-cmsenv                                                                    # combine on PATH
-./run_pO_fits.sh both all                                                 # 4. fit everything
-
-# --- back in pO_analysis (plain ROOT) ---
-cd pO_analysis/analysis
-root -l -q 'charge_asym.C+("<fork>/test/pO_fit_out/mu/summary/mu_fitted_yields.root")'   # 5. observables
-root -l -q 'FBratio.C+("<fork>/test/pO_fit_out/mu/summary/mu_fitted_yields.root")'
-```
-
----
-
-## Step 1 — Skims + N_gen  (`pO_analysis/skim/`)
-
-```bash
-cd pO_analysis/skim
-./run_all.sh Wmu      # W -> mu nu   -> WToMuNu_pO_PFMet_*_hist.root
-./run_all.sh Wel      # W -> e  nu   -> WToElecNu_pO_PFMet_*_hist.root
-./run_all.sh Zmm      # Z -> mu mu   -> ZToMuMu_pO2025_*_hist.root
-./run_all.sh Zee      # Z -> e e     -> ZToEE_pO2025_*_hist.root
-#   (or: ./run_all.sh all)
-./run_ngen.sh         # -> skim/rootfile/ngen.root   (MC normalization denominator)
-```
-
-`ngen.root` is required: `skim/mc_norm.h::MCScale` reads it for the absolute
-scale `k_s = A·σ·L/N_gen`. Without it MCScale returns 1.0 (warns) and the inputs
-are NOT absolutely normalized.
-
-## Step 2 — ABCD QCD templates  (`pO_analysis/correction/`)
-
-```bash
-cd pO_analysis/correction
-root -l -q 'qcd_abcd.C+'        # muon     -> rootfile/qcd_abcd_mu.root
-root -l -q 'qcd_abcd.C+(true)'  # electron -> rootfile/qcd_abcd_ele.root
-```
-
-These are the data-driven low-MET QCD templates the W fit uses. If they are
-missing, Step 3 warns and the W inputs omit `qcd` (the fit then has no QCD
-background — wrong for electrons especially).
-
-## Step 3 — Structured Combine inputs  (`pO_analysis/plotting/`)
-
-```bash
-cd pO_analysis/plotting
-root -l -q -b 'mtandmet.C+(false)'      # muon  W -> plots/combine_input_W.root
-root -l -q -b 'mtandmet.C+(true)'       # ele   W -> plots/Elec/combine_input_W.root
-root -l -q -b 'dileptonpeak.C+(false)'  # Z mumu  -> plots/combine_input_Z.root
-root -l -q -b 'dileptonpeak.C+(true)'   # Z ee    -> plots/Elec/combine_input_Z.root
-```
-
-Each `combine_input_W.root` has **one TDirectory per fit region**, each holding
-the 6 **absolute** templates (`data_obs/signal/z/ztau/wtau/qcd`):
-
-```
-Wp_lab_y0 … Wp_lab_y11   Wm_lab_y0 … Wm_lab_y11     (standard lab-frame bins)
-Wp_fb_y0  … Wp_fb_y11    Wm_fb_y0  … Wm_fb_y11      (FB-symmetric bins)
-Wp_incl  Wm_incl  W_incl                            (charge-inclusive in y)
-```
-`combine_input_Z.root` has a single `Z_incl/` dir (`data_obs/signal/w/wtau/ztau`).
-
-Quick check of a file:
-```bash
-root -l plots/combine_input_W.root
-root [1] .ls                       # lists the 51 region dirs
-root [2] W_incl->cd(); .ls         # data_obs/signal/z/ztau/wtau/qcd
-```
-
-## Step 4 — Run the fits  (this fork, **cmsenv**)
+## Run
 
 ```bash
 cd HiggsAnalysis-CombinedLimit/test
 cmsenv
-./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [options]
+./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [--dry-run] [--no-postfit]
+#   PO_PLOTS=/path/to/pO_analysis/plotting/plots   (else --plots-dir, else autodetect)
 ```
 
-| arg / option | meaning | default |
-|---|---|---|
-| `mu` / `ele` / `both` | channel(s) | `both` |
-| `perbin` | the 48 per-(charge,y) W regions (lab + FB) | — |
-| `incl`   | `Wp_incl Wm_incl W_incl Z_incl` | — |
-| `combined` | only the simultaneous `WZ` fit | — |
-| `all`    | perbin + incl + combined | `all` |
-| `--dry-run` | build datacards + check inputs only (**no cmsenv needed**) | off |
-| `--no-postfit` | skip postfit plots (faster) | off |
-| `--plots-dir DIR` | analysis plots dir (else `$PO_PLOTS`, else autodetect) | autodetect |
-| `--out DIR` | output root | `test/pO_fit_out` |
+| arg / option | meaning |
+|---|---|
+| `mu` / `ele` / `both` | channel(s) (default `both`) |
+| `perbin` | 48 per-(charge,y) W regions (lab + FB) |
+| `incl`   | `Wp_incl Wm_incl W_incl Z_incl` |
+| `combined` | the simultaneous `WZ` fit only |
+| `all`    | perbin + incl + combined (default) |
+| `--dry-run` | build datacards only (no `cmsenv` needed) |
+| `--no-postfit` | skip postfit plots |
 
-The driver autodetects the analysis plots dir (local Mac path, then the lxplus
-AFS path). If neither applies, point it explicitly:
-```bash
-PO_PLOTS=/path/to/pO_analysis/plotting/plots ./run_pO_fits.sh both all
-#   or
-./run_pO_fits.sh both all --plots-dir /path/to/pO_analysis/plotting/plots
-```
+Per region: `text2workspace` → `combine -M FitDiagnostics --saveShapes
+--saveWithUncertainties` into `pO_fit_out/<chan>/{datacards,fits/<region>,postfit,
+summary}`. Per-region failures are logged and skipped (not fatal).
 
-Per region it runs `text2workspace.py` → `combine -M FitDiagnostics --saveShapes
---saveWithUncertainties` and tolerates per-region failures (logs, then continues).
+## Pieces (all under `test/`)
+- `run_pO_fits.sh` — master driver.
+- `my_script/make_pO_datacards.sh` — generates all 53 datacards/channel.
+- `my_script/extract_pO_yields.C` — `fit_s` → `<chan>_W_yields.csv`,
+  `<chan>_summary.csv`, `<chan>_fitted_yields.root` (single-bin
+  `h_mt_W{p,m}_y0..11(_FB)` with Sumw2 = fit error).
+- `my_script/make_yields_from_csv.C` — rebuild the `.root` from the CSV if the
+  former came out empty (no fit re-run).
+- `my_script/draw_postfit_pO.C` — postfit data/MC, same cosmetics as `mtandmet.C`.
+- `sync_lxplus.sh` — `upload` inputs+scripts / `download` results, one SSH auth.
 
-Examples:
-```bash
-./run_pO_fits.sh both all --dry-run     # sanity: just make the 53 datacards/chan
-./run_pO_fits.sh mu perbin              # only the muon per-bin W fits
-./run_pO_fits.sh both combined          # only the simultaneous W+Z fits
-```
+## Fit model
+- `signal` → POI `r` (per-region W yield). Discriminant = **PF MET shape**.
+- EWK `z/ztau/wtau` → one shared `ewk_norm` rateParam (relative MC composition
+  LOCKED; overall EWK scale floats).
+- ABCD `qcd` → free `qcd_norm`.
+- Combined `WZ`: shared `eff_lumi` multiplies W `signal` + Z `zsig`; the Z peak
+  pins it (cancels in W/Z ratios). Sanity-check `eff_lumi ≈ 1` afterwards.
 
-## Step 4b — Running the fit on lxplus (split workflow)
+All templates are absolutely normalized (`k_s = A·σ·L/N_gen`) — no area norm.
 
-Typical split: **build inputs locally** (Steps 1–3, plain ROOT) → **fit on
-lxplus** (Step 4, needs `cmsenv`) → **observables locally** (Steps 5–6). Only two
-small transfers are needed.
+## lxplus
+`./sync_lxplus.sh upload` (4 inputs + scripts → lxplus), fit there, then
+`./sync_lxplus.sh download [--postfit]`. Defaults:
+`FORK_LX=/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit`,
+`ANA_LX=/afs/cern.ch/user/z/zheng/pO_analysis` (override via env). See
+`pO_analysis/README.md` Module 4 for the full split workflow.
 
-**Easiest — use the helper `test/sync_lxplus.sh`** (wraps every rsync below; your
-lxplus paths are baked in as defaults, override via env `LX`/`ANA_LX`/`FORK_LX`):
-```bash
-cd HiggsAnalysis-CombinedLimit/test
-./sync_lxplus.sh upload               # push inputs + scripts to lxplus
-#   ... ssh in, cmsenv, run the fit (the script prints the exact command) ...
-./sync_lxplus.sh download             # pull summary/ (fitted yields + CSVs) back
-./sync_lxplus.sh download --postfit   # also pull the postfit plots
-#   options: --chan mu|ele , --dry-run ; subcommands: upload-inputs, upload-scripts
-```
-
-The manual rsync equivalents are below. Set once (adjust to your accounts/paths):
-
-```bash
-LX=zheng@lxplus.cern.ch
-ANA_LX=/afs/cern.ch/user/z/zheng/pO_analysis                  # analysis repo on lxplus
-FORK_LX=/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit # combine fork on lxplus (CMSSW subsystem/package layout: slash, not hyphen)
-```
-
-### PUSH to lxplus (before the fit)
-
-| what | why |
-|------|-----|
-| the **4 structured input files** (`plots/combine_input_{W,Z}.root` + `plots/Elec/combine_input_{W,Z}.root`) | the only data the fit consumes (~300 KB W + ~7 KB Z each) |
-| the **5 fit scripts** (`run_pO_fits.sh`, `my_script/{make_pO_datacards.sh,extract_pO_yields.C,draw_postfit_pO.C,plotting_helper.C}`) | the pipeline code (via git is cleanest) |
-
-You do **NOT** push `ngen.root`, the ABCD QCD templates, or the skim ntuples —
-those were only needed to *build* the inputs in Step 3, done locally.
-
-```bash
-# (1) inputs -- preserve the plots/ + plots/Elec/ layout so the driver autodetects them
-cd pO_analysis/plotting
-rsync -avR \
-  plots/combine_input_W.root      plots/combine_input_Z.root \
-  plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root \
-  "$LX:$ANA_LX/plotting/"
-
-# (2) scripts -- via git (recommended)
-cd ../../HiggsAnalysis-CombinedLimit
-git add test/run_pO_fits.sh test/my_script/make_pO_datacards.sh \
-        test/my_script/extract_pO_yields.C test/my_script/draw_postfit_pO.C \
-        test/my_script/plotting_helper.C
-git commit -m "pO rapidity-binned W/Z fit pipeline"
-git push origin zheng/po-analysis
-ssh "$LX" "cd $FORK_LX && git checkout zheng/po-analysis && git pull"
-#   ... or scp them if you don't want to commit yet:
-# rsync -av test/run_pO_fits.sh "$LX:$FORK_LX/test/"
-# rsync -av test/my_script/make_pO_datacards.sh test/my_script/extract_pO_yields.C \
-#           test/my_script/draw_postfit_pO.C test/my_script/plotting_helper.C \
-#           "$LX:$FORK_LX/test/my_script/"
-```
-(`CMS_lumi.C`/`.h` are unchanged and already in the fork checkout — no need to send.)
-
-### FIT on lxplus
-
-```bash
-ssh "$LX"
-cd <your CMSSW>/src && cmsenv          # combine + text2workspace.py on PATH
-cd $FORK_LX/test
-PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all
-#   (PO_PLOTS is also autodetected when pO_analysis sits at the standard AFS path.)
-```
-
-### DOWNLOAD back (for the observables)
-
-Only the small `summary/` dirs are needed downstream (fitted-yield histos + CSVs).
-The bulky `fits/` FitDiagnostics outputs can stay on lxplus.
-
-| what | why |
-|------|-----|
-| `pO_fit_out/<chan>/summary/<chan>_fitted_yields.root` | input to `charge_asym.C` / `FBratio.C` |
-| `pO_fit_out/<chan>/summary/<chan>_W_yields.csv`, `<chan>_summary.csv` | yields for cross-sections / inspection |
-| `pO_fit_out/<chan>/postfit/*` *(optional)* | to eyeball the postfit plots |
-
-```bash
-cd HiggsAnalysis-CombinedLimit/test          # your LOCAL fork
-for c in mu ele; do
-  mkdir -p pO_fit_out/$c/summary pO_fit_out/$c/postfit
-  rsync -av "$LX:$FORK_LX/test/pO_fit_out/$c/summary/"  pO_fit_out/$c/summary/
-  rsync -av "$LX:$FORK_LX/test/pO_fit_out/$c/postfit/"  pO_fit_out/$c/postfit/   # optional
-done
-```
-
-Then run Step 6 locally pointing at the downloaded `*_fitted_yields.root`.
-
-> Alternative: run **everything** on lxplus (repoint the skim to EOS per the
-> analysis README's "Input data", then Steps 1–6 all remote) — nothing needs
-> transferring; you'd only copy back the final plots to look at them.
-
-## Step 5 — Outputs
-
-```
-test/pO_fit_out/<chan>/                 # chan = mu | ele
-  combine_input_W.root  combine_input_Z.root   # copied inputs (so cards self-resolve)
-  datacards/datacard_<region>.txt
-  fits/<region>/   fitDiagnostics_<region>.root, workspace.root, fit.log, t2w.log
-  postfit/<region>.png/.pdf             # data/MC, same cosmetics as mtandmet.C
-  summary/
-    <chan>_W_yields.csv      # per-(charge,binning,y): r, rErr, signal_prefit,
-                             #   fitted_yield, fitted_yield_err, qcd_norm, ewk_norm
-    <chan>_summary.csv       # Wp_incl/Wm_incl/W_incl/Z_incl + WZ combined (r, eff_lumi)
-    <chan>_fitted_yields.root  # h_mt_W{p,m}_y{0..11}(_FB) single-bin histos
-```
-
-`fitted_yield = r × (prefit signal integral)`, `err = rErr × (same)`.
-
-## Step 6 — Feed the analysis observables  (`pO_analysis/analysis/`)
-
-`<chan>_fitted_yields.root` contains exactly the histogram names
-`charge_asym.C` and `FBratio.C` read, with the fit uncertainty in Sumw2 — so the
-**raw→fitted swap is just the input path** (no macro edits):
-
-```bash
-cd pO_analysis/analysis
-F=<fork>/test/pO_fit_out/mu/summary/mu_fitted_yields.root
-root -l -q "charge_asym.C+(\"$F\",\"../skim/rootfile/charge_asym_fit_mu.root\")"
-root -l -q "FBratio.C+(\"$F\",\"../skim/rootfile/FBratio_fit_mu.root\")"
-#   ... and likewise for ele_fitted_yields.root
-```
-(For cross-sections, read the absolute fitted yields straight from
-`<chan>_W_yields.csv` / `<chan>_summary.csv`.)
-
----
-
-## Fit model (what the datacards encode)
-
-Decided 2026-06-24. Per W fit region (MET discriminant):
-
-- **`signal` → POI `r`** — the per-region W yield strength we extract.
-- **EWK `z`,`ztau`,`wtau` → one shared `ewk_norm` rateParam** — relative MC
-  composition LOCKED (they're absolute `k_s` templates); only the overall EWK
-  normalization floats.
-- **ABCD `qcd` → free `qcd_norm` rateParam** — data-driven, least trusted.
-
-Simultaneous **W+Z** (`datacard_WZ.txt`, 2 channels): a shared **`eff_lumi`**
-rateParam multiplies BOTH the W `signal` and the Z signal (renamed `zsig`, not a
-POI). The high-purity Z peak pins `eff_lumi`; it cancels in W/Z ratios. The
-per-bin W fits stay independent — the common scale cancels in charge-asym and F/B
-ratios anyway, so the Z control matters mainly for the absolute cross-section.
-
-All templates are **absolutely** normalized (`k_s = A·σ·L/N_gen`) — there is NO
-area normalization (the old `make_combine_input*.C` `data_int/mc_sum` rescale is
-gone).
-
-## Customization
-
-- **Retune the model** (priors, ranges, freeze QCD, add lnN systematics): edit
-  `my_script/make_pO_datacards.sh` (`gen_W_card` / `gen_Z_card` /
-  `gen_WZ_combined_card`). No re-skim, no re-make-input.
-- **Re-bin / change the QCD split**: those live in `pO_analysis/plotting/mtandmet.C`
-  (rapidity edges mirror `skim/skim_common.h::kYEdges` / `kYEdgesFB`); re-run Step 3.
-- **Cosmetics** of the postfit plots come from `my_script/plotting_helper.C`
-  (synced from the analysis repo's `plotting/plotting_helper.C`) via
-  `SaveNicePlot1D_WithBkg`.
-
-## Troubleshooting
-
-- `combine / text2workspace.py not on PATH -- did you cmsenv?` → run `cmsenv` in
-  your CMSSW area (or `--dry-run` to only build datacards).
-- `analysis plots dir not found` → run Step 3, or pass `--plots-dir` / `$PO_PLOTS`.
-- A few **tail FB bins** can have an all-zero `qcd` template (no QCD there); that
-  region may warn or fail in `text2workspace` — the driver skips it and continues,
-  the yield comes out 0, and `charge_asym`/`FBratio` guard against it.
-- Check `eff_lumi ≈ 1` in `<chan>_summary.csv` after the combined fit — it
-  validates that the Z control broke the `eff_lumi`↔`r` degeneracy cleanly.
-
-## Superseded (kept for reference, not used by `run_pO_fits.sh`)
-
-`run_fit.sh`, `my_script/make_combine_input{,_Z}.C` (area-normalized + Rayleigh
-`pdfbkg`), `my_script/testdatacard_{inclusive,Zmumu,Zee}.txt`,
+## Superseded (kept for reference, not used)
+`run_fit.sh`, `my_script/make_combine_input{,_Z}.C`,
+`my_script/testdatacard_{inclusive,Zmumu,Zee}.txt`,
 `my_script/draw_postfit_{inclusive,Zmumu,Zee}.C`.
