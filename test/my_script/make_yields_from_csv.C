@@ -40,6 +40,8 @@ void make_yields_from_csv(const char *csvPath, const char *outRoot) {
     int iy = std::atoi(c[3].c_str());
     double y = std::atof(c[7].c_str());   // fitted_yield
     double e = std::atof(c[8].c_str());   // fitted_yield_err
+    // "h_mt_" is just the container name charge_asym.C/FBratio.C read by; the
+    // content is the MET-shape-fit yield, NOT an m_T quantity (no m_T anywhere).
     TString nm = TString::Format("h_mt_%s_y%d%s", charge.c_str(), iy, (binning == "fb" ? "_FB" : ""));
     fy->cd();
     TH1D *h = new TH1D(nm, nm, 1, 0.0, 1.0);

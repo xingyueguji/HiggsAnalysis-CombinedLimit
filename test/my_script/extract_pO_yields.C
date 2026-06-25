@@ -96,6 +96,10 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
         csv << R << "," << charges[ic] << "," << binnings[ib] << "," << iy << ","
             << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << ","
             << v.qn << "," << v.qnE << "," << v.en << "," << v.enE << "\n";
+        // NB: the "h_mt_" name is ONLY the container charge_asym.C / FBratio.C
+        // read by (their useMT=true default) -- it is NOT an m_T quantity. The
+        // content is the MET-shape-fit signal yield (y = r * MET-template
+        // integral). Nothing m_T-based enters the FB ratio / charge asymmetry.
         TString hname = TString::Format("h_mt_%s_y%d%s", charges[ic], iy, (ib == 1 ? "_FB" : ""));
         makeYieldHist(hname, y, e);
       }
