@@ -137,12 +137,25 @@ Examples:
 
 Typical split: **build inputs locally** (Steps 1–3, plain ROOT) → **fit on
 lxplus** (Step 4, needs `cmsenv`) → **observables locally** (Steps 5–6). Only two
-small transfers are needed. Set once (adjust to your accounts/paths):
+small transfers are needed.
+
+**Easiest — use the helper `test/sync_lxplus.sh`** (wraps every rsync below; your
+lxplus paths are baked in as defaults, override via env `LX`/`ANA_LX`/`FORK_LX`):
+```bash
+cd HiggsAnalysis-CombinedLimit/test
+./sync_lxplus.sh upload               # push inputs + scripts to lxplus
+#   ... ssh in, cmsenv, run the fit (the script prints the exact command) ...
+./sync_lxplus.sh download             # pull summary/ (fitted yields + CSVs) back
+./sync_lxplus.sh download --postfit   # also pull the postfit plots
+#   options: --chan mu|ele , --dry-run ; subcommands: upload-inputs, upload-scripts
+```
+
+The manual rsync equivalents are below. Set once (adjust to your accounts/paths):
 
 ```bash
 LX=zheng@lxplus.cern.ch
 ANA_LX=/afs/cern.ch/user/z/zheng/pO_analysis                  # analysis repo on lxplus
-FORK_LX=/afs/cern.ch/user/z/zheng/HiggsAnalysis-CombinedLimit # combine fork on lxplus (in your CMSSW area)
+FORK_LX=/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit # combine fork on lxplus (CMSSW subsystem/package layout: slash, not hyphen)
 ```
 
 ### PUSH to lxplus (before the fit)
