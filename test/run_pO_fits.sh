@@ -6,8 +6,12 @@
 #   1. locates the structured Combine inputs from the analysis repo
 #        <plots>/combine_input_W.root , <plots>/combine_input_Z.root      (muon)
 #        <plots>/Elec/combine_input_{W,Z}.root                            (electron)
-#   2. generates ALL datacards (per-(charge,y) lab + FB, per-charge incl,
-#      W_incl, Z_incl, and the simultaneous W+Z card)        [make_pO_datacards.sh]
+#   2. generates ALL datacards (per-(charge,y) lab + FB -- each a TWO-channel
+#      card fitted simultaneously with Z_incl -- per-charge incl, W_incl,
+#      Z_incl, and the simultaneous W+Z card).  Two-parameter model: POI 'r'
+#      scales all W-related MC, 'dy_norm' all DY-related MC (shared with the
+#      Z peak in the simultaneous cards), 'qcd_norm' the data-driven QCD.
+#      [make_pO_datacards.sh]
 #   3. runs text2workspace + combine -M FitDiagnostics per region, each in its
 #      own clean output subdir
 #   4. extracts fitted signal yields -> CSV + h_mt_W{p,m}_y{..}(_FB) histograms

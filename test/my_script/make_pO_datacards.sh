@@ -6,35 +6,47 @@
 # Consumes the STRUCTURED Combine inputs produced by the analysis repo
 #   plotting/mtandmet.C      -> combine_input_W.root  (TDir per fit region)
 #   plotting/dileptonpeak.C  -> combine_input_Z.root  (TDir "Z_incl")
-# Each region TDirectory holds the 6 absolute templates
+# Each region TDirectory holds the absolute templates
 #   data_obs / signal / z / ztau / wtau / qcd        (W)
 #   data_obs / signal / w / wtau / ztau              (Z)
 # All templates are ABSOLUTELY normalized (k_s = A*sigma*L/N_gen) -- no area
 # normalization -- so the fit floats real normalizations, not shapes-to-data.
 #
-# Fit model (per the analysis decisions):
-#   * signal           -> POI 'r'  (the per-region W yield strength we extract)
-#   * z / ztau / wtau   -> ONE shared rateParam 'ewk_norm' (relative MC
-#                          composition LOCKED, only the overall EWK scale floats)
-#   * qcd  (ABCD)       -> free rateParam 'qcd_norm' (data-driven, least trusted)
-# The combined W+Z card adds a shared 'eff_lumi' (lepton eff x lumi) that
-# multiplies BOTH the W signal and the Z signal: the high-purity Z peak pins it
-# and it cancels in W/Z ratios -- the "Z as control" simultaneous fit.
+# Fit model (TWO-PARAMETER scheme, 2026-07-01; systematics deferred):
+#   * W-related  (W signal + W backgrounds wtau/w) -> ONE scale = the POI 'r'
+#   * DY-related (z + ztau + Z signal)             -> ONE scale = 'dy_norm'
+#     (standalone Z card: roles flip -- the POI 'r' IS the DY scale on
+#      signal+ztau, and the W backgrounds w/wtau get a free 'w_norm')
+#   * qcd (ABCD)                                   -> free 'qcd_norm'
+# Relative composition WITHIN each group stays locked by the absolute k_s
+# templates; only the group scales float.
 #
-# Usage:  make_pO_datacards.sh <Wfile_basename> <Zfile_basename> <outdir>
-# (the driver copies the two .root inputs into <outdir> first, so datacards
-#  reference them by basename and Combine resolves them relative to the card.)
+# SIMULTANEOUS cards -- the inclusive 'WZ' AND every per-bin W card -- have TWO
+# fit channels: the W region + Z_incl.  'r' scales all W-related processes in
+# BOTH channels; the shared 'dy_norm' scales all DY-related in BOTH channels,
+# so the high-purity Z peak pins dy_norm (this replaces the old shared
+# 'eff_lumi').  Per-bin cards are two-channel too: each (charge, lab/fb, y-bin)
+# W region is fitted together with Z_incl.
+#
+# If the Z input file is missing, the per-bin cards fall back to standalone
+# W-only cards (and the Z_incl / WZ cards are skipped) so the W fits still run.
+#
+# Usage:  make_pO_datacards.sh <Wfile> <Zfile> <outdir>
+# (the driver copies the two .root inputs into the work dir first and passes
+#  absolute paths, so Combine resolves shapes from any CWD.)
 #
 # bash-3.2 safe (macOS stock bash): no associative arrays, no 'declare -A'.
 # =============================================================================
 set -euo pipefail
 
-WFILE="${1:?need W input basename}"
-ZFILE="${2:?need Z input basename}"
+WFILE="${1:?need W input file}"
+ZFILE="${2:?need Z input file}"
 OUTDIR="${3:?need output dir}"
 mkdir -p "$OUTDIR"
 
-# ---- W single-region datacard (one fit region = one Combine channel) --------
+# ---- standalone W datacard (one W region, no Z channel) ----------------------
+# Used for Wp_incl / Wm_incl / W_incl, and as the per-bin fallback when the Z
+# input is missing.
 gen_W_card() {
   R="$1"                       # region/channel label == TDirectory name
   cat > "$OUTDIR/datacard_${R}.txt" <<EOF
@@ -58,13 +70,13 @@ process  signal    z       ztau    wtau    qcd
 process  0         1       2       3       4
 rate     -1        -1      -1      -1      -1
 ------------
-# ALL MC (signal + EWK z/ztau/wtau) share ONE normalization = the POI 'r':
-# the relative composition is FIXED by the absolute k_s cross-section templates,
-# only the overall MC scale floats. 'signal' (index 0) is scaled by r; reusing
-# the name 'r' as a rateParam ties the EWK backgrounds to that SAME r.
-r        rateParam ${R} z    1
-r        rateParam ${R} ztau 1
+# TWO-parameter model: the POI 'r' scales ALL W-related MC (signal, index 0,
+# scaled automatically + wtau tied to the same 'r' via rateParam); 'dy_norm'
+# scales ALL DY-related MC (z + ztau).  Composition within each group is
+# locked by the absolute k_s templates.
 r        rateParam ${R} wtau 1
+dy_norm  rateParam ${R} z    1 [0,10]
+dy_norm  rateParam ${R} ztau 1
 # Data-driven ABCD QCD: its own free normalization.
 qcd_norm rateParam ${R} qcd  1 [0,10]
 EOF
@@ -92,72 +104,92 @@ process  signal    w       wtau    ztau
 process  0         1       2       3
 rate     -1        -1      -1      -1
 ------------
-# ALL Z MC (signal + w/wtau/ztau) share ONE normalization = the POI 'r'
-# (relative composition fixed by the absolute cross sections).
-r rateParam Z_incl w    1
-r rateParam Z_incl wtau 1
-r rateParam Z_incl ztau 1
+# TWO-parameter model, Z card: the POI 'r' IS the DY scale (signal, index 0 +
+# ztau tied to the same 'r'); 'w_norm' scales the W-related backgrounds
+# (w + wtau).
+r      rateParam Z_incl ztau 1
+w_norm rateParam Z_incl w    1 [0,10]
+w_norm rateParam Z_incl wtau 1
 EOF
 }
 
-# ---- Combined W_incl + Z_incl simultaneous datacard -------------------------
-# Two channels.  POI 'r' scales ONLY the W signal (process index 0).  The Z
-# signal is renamed 'zsig' (index >=1, NOT a POI) and is scaled solely by the
-# shared 'eff_lumi'.  eff_lumi multiplies BOTH 'signal' (W) and 'zsig' (Z); the
-# Z peak (~100% zsig) pins it, propagating the lepton-eff x lumi constraint to W.
-gen_WZ_combined_card() {
-  cat > "$OUTDIR/datacard_WZ.txt" <<EOF
-# Auto-generated -- simultaneous W(incl) + Z(incl) fit, shared eff_lumi.
+# ---- two-channel simultaneous datacard: one W region + Z_incl ---------------
+# $1 = card name (datacard_<name>.txt), $2 = W channel label inside the card,
+# $3 = W TDirectory in ${WFILE}.  Used for the inclusive 'WZ' card
+# (WZ / Wincl / W_incl) and for EVERY per-bin card (R / R / R).
+# The Z signal is renamed 'zsig' (index >=1) so the POI 'r' does NOT scale it:
+# 'r' = all W-related in both channels, 'dy_norm' = all DY-related in both
+# channels, pinned by the Z peak.
+gen_WZ_card() {
+  CARD="$1"; WCH="$2"; WDIR="$3"
+  cat > "$OUTDIR/datacard_${CARD}.txt" <<EOF
+# Auto-generated -- simultaneous W('${WDIR}') + Z(incl) fit, two-parameter model.
 imax 2
 jmax *
 kmax *
 ------------
-shapes data_obs Wincl ${WFILE} W_incl/data_obs
-shapes signal   Wincl ${WFILE} W_incl/signal
-shapes z        Wincl ${WFILE} W_incl/z
-shapes ztau     Wincl ${WFILE} W_incl/ztau
-shapes wtau     Wincl ${WFILE} W_incl/wtau
-shapes qcd      Wincl ${WFILE} W_incl/qcd
+shapes data_obs ${WCH} ${WFILE} ${WDIR}/data_obs
+shapes signal   ${WCH} ${WFILE} ${WDIR}/signal
+shapes z        ${WCH} ${WFILE} ${WDIR}/z
+shapes ztau     ${WCH} ${WFILE} ${WDIR}/ztau
+shapes wtau     ${WCH} ${WFILE} ${WDIR}/wtau
+shapes qcd      ${WCH} ${WFILE} ${WDIR}/qcd
 shapes data_obs Zincl ${ZFILE} Z_incl/data_obs
 shapes zsig     Zincl ${ZFILE} Z_incl/signal
 shapes w        Zincl ${ZFILE} Z_incl/w
 shapes wtau     Zincl ${ZFILE} Z_incl/wtau
 shapes ztau     Zincl ${ZFILE} Z_incl/ztau
 ------------
-bin          Wincl   Zincl
-observation  -1      -1
+bin          ${WCH}   Zincl
+observation  -1       -1
 ------------
-bin      Wincl    Wincl   Wincl   Wincl   Wincl    Zincl   Zincl   Zincl   Zincl
+bin      ${WCH}   ${WCH}  ${WCH}  ${WCH}  ${WCH}   Zincl   Zincl   Zincl   Zincl
 process  signal   z       ztau    wtau    qcd      zsig    w       wtau    ztau
 process  0        1       2       3       4        5       6       7       8
 rate     -1       -1      -1      -1      -1       -1      -1      -1      -1
 ------------
-# Shared lepton-eff x lumi scale on ALL MC in BOTH channels (signal + every MC
-# background): fixes the relative MC composition; the high-purity Z peak pins it.
-eff_lumi  rateParam * signal 1 [0,5]
-eff_lumi  rateParam * zsig   1 [0,5]
-eff_lumi  rateParam Wincl z  1 [0,5]
-eff_lumi  rateParam Zincl w  1 [0,5]
-eff_lumi  rateParam * wtau   1 [0,5]
-eff_lumi  rateParam * ztau   1 [0,5]
-# W cross-section deviation: the POI 'r' is an EXTRA scale on the W signal only
-# (signal index 0 -> scaled by r*eff_lumi). Data-driven QCD: its own free param.
-qcd_norm  rateParam Wincl qcd 1 [0,10]
+# POI 'r' scales ALL W-related MC in BOTH channels: the W signal (index 0,
+# scaled automatically) + wtau here, and the w/wtau backgrounds under the Z
+# peak.
+r        rateParam ${WCH} wtau 1
+r        rateParam Zincl  w    1
+r        rateParam Zincl  wtau 1
+# Shared 'dy_norm' scales ALL DY-related MC in BOTH channels; the high-purity
+# Z peak pins it (this replaces the old shared 'eff_lumi').
+dy_norm  rateParam ${WCH} z    1 [0,10]
+dy_norm  rateParam ${WCH} ztau 1
+dy_norm  rateParam Zincl  zsig 1
+dy_norm  rateParam Zincl  ztau 1
+# Data-driven ABCD QCD: its own free normalization.
+qcd_norm rateParam ${WCH} qcd  1 [0,10]
 EOF
 }
 
 # ---- generate everything ----------------------------------------------------
+HAVE_Z=0
+[ -f "$ZFILE" ] && HAVE_Z=1
+
 n=0
 for C in Wp Wm; do
   for B in lab fb; do
     for iy in $(seq 0 11); do
-      gen_W_card "${C}_${B}_y${iy}"; n=$((n+1))
+      R="${C}_${B}_y${iy}"
+      if [ "$HAVE_Z" -eq 1 ]; then
+        gen_WZ_card "$R" "$R" "$R"      # per-bin fit = simultaneous with Z_incl
+      else
+        gen_W_card "$R"                 # fallback: W-only per-bin card
+      fi
+      n=$((n+1))
     done
   done
   gen_W_card "${C}_incl"; n=$((n+1))
 done
 gen_W_card "W_incl";       n=$((n+1))
-gen_Z_card;                n=$((n+1))
-gen_WZ_combined_card;      n=$((n+1))
+if [ "$HAVE_Z" -eq 1 ]; then
+  gen_Z_card;                       n=$((n+1))
+  gen_WZ_card "WZ" "Wincl" "W_incl"; n=$((n+1))
+else
+  echo "[make_pO_datacards] WARN: Z input '${ZFILE}' missing -> per-bin cards are W-only; Z_incl + WZ skipped."
+fi
 
 echo "[make_pO_datacards] wrote ${n} datacards to ${OUTDIR}"

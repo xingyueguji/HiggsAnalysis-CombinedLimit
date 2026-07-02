@@ -131,6 +131,16 @@ void draw_postfit_pO(const char *fitDiagFile,
         : Form("r = %.3f #pm %.3f", rv->getVal(), rv->getError()));
     else if (bad)
       box.push_back(Form("#color[2]{fit status %d, covQ %d}", fr->status(), fr->covQual()));
+    // Two-parameter model diagnostics: whichever of these float in this fit
+    // (dy_norm in W + simultaneous cards, w_norm in the standalone Z card,
+    // qcd_norm in W cards).  The info box auto-sizes to its line count.
+    // Display labels avoid '_' (TLatex would render it as a subscript).
+    const char *pars[3]  = {"dy_norm", "w_norm", "qcd_norm"};
+    const char *plabs[3] = {"DY norm", "W norm", "QCD norm"};
+    for (int ip = 0; ip < 3; ++ip) {
+      RooRealVar *x = (RooRealVar *)fr->floatParsFinal().find(pars[ip]);
+      if (x) box.push_back(Form("%s = %.3f #pm %.3f", plabs[ip], x->getVal(), x->getError()));
+    }
   }
 
   PlotStyle ps;

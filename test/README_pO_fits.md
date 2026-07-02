@@ -23,9 +23,9 @@ cmsenv
 | arg / option | meaning |
 |---|---|
 | `mu` / `ele` / `both` | channel(s) (default `both`) |
-| `perbin` | 48 per-(charge,y) W regions (lab + FB) |
-| `incl`   | `Wp_incl Wm_incl W_incl Z_incl` |
-| `combined` | the simultaneous `WZ` fit only |
+| `perbin` | 48 per-(charge,y) W regions (lab + FB), each fitted **simultaneously with `Z_incl`** (two-channel card) |
+| `incl`   | `Wp_incl Wm_incl W_incl Z_incl` (standalone) |
+| `combined` | the simultaneous `WZ` (`W_incl`+`Z_incl`) fit only |
 | `all`    | perbin + incl + combined (default) |
 | `--dry-run` | build datacards only (no `cmsenv` needed) |
 | `--no-postfit` | skip postfit plots |
@@ -45,18 +45,26 @@ summary}`. Per-region failures are logged and skipped (not fatal).
 - `my_script/draw_postfit_pO.C` — postfit data/MC, same cosmetics as `mtandmet.C`.
 - `sync_lxplus.sh` — `upload` inputs+scripts / `download` results, one SSH auth.
 
-## Fit model
-- **All MC (signal + EWK `z/ztau/wtau`) share ONE scale = the POI `r`** — relative
-  composition LOCKED by the absolute `k_s` templates, only the overall MC norm
-  floats. Done by reusing `r` as a `rateParam` on the EWK backgrounds (signal is
-  index 0 → `r` scales it; the rateParam ties the rest to the same `r`). Fitted W
+## Fit model (two-parameter, 2026-07-01)
+- **Two MC scales per fit**: the POI **`r` = all W-related MC** (W `signal` +
+  `wtau`, plus the `w`/`wtau` backgrounds under the Z peak in simultaneous
+  cards) and **`dy_norm` = all DY-related MC** (`z` + `ztau` + the Z signal in
+  simultaneous cards). Relative composition WITHIN each group stays LOCKED by
+  the absolute `k_s` templates. Implemented by reusing `r` as a `rateParam` on
+  the W backgrounds (signal is index 0 → `r` scales it automatically). Fitted W
   yield = `r`×signal-prefit. Discriminant = **PF MET shape**.
+- Standalone `Z_incl` card: roles flip — the POI `r` IS the DY scale
+  (`signal`+`ztau`), and the W backgrounds get a free `w_norm`.
 - ABCD `qcd` → its own free `qcd_norm`.
-- Combined `WZ`: shared `eff_lumi` multiplies **all MC in both channels** (fixes
-  the relative composition; the Z peak pins it); `r` is an extra scale on the W
-  signal only. Sanity-check `eff_lumi ≈ 1` afterwards.
+- **Simultaneous cards** (`WZ` AND every per-bin W card): two fit channels
+  (the W region + `Z_incl`). `r` scales the W-related in both channels;
+  the shared `dy_norm` scales the DY-related in both — the high-purity Z peak
+  pins it (this **replaces the old shared `eff_lumi`**). Sanity-check
+  `dy_norm ≈ 1` afterwards. If `combine_input_Z.root` is missing, per-bin
+  cards fall back to standalone W-only and `Z_incl`/`WZ` are skipped.
 
 All templates are absolutely normalized (`k_s = A·σ·L/N_gen`) — no area norm.
+Systematics deliberately deferred (statistics-only fits for now).
 
 ## Diagnosing fit quality
 
@@ -65,6 +73,9 @@ Each postfit plot (`draw_postfit_pO.C`) now prints, in the top-right info box:
   the postfit total, robust at low counts (ndf = bins used − floating params).
   χ²/ndf ≈ 1 and a non-tiny p mean good agreement.
 - `r = … ± …` — the fitted signal strength for that region.
+- `DY norm` / `W norm` / `QCD norm` — the fitted `dy_norm` / `w_norm` /
+  `qcd_norm`, whichever float in that fit (two-parameter model diagnostics;
+  all should sit near 1 except `qcd_norm`, which is genuinely free).
 - a **red** `status N, covQ M` only when the fit did **not** converge cleanly
   (want `status 0`, `covQ 3` = full accurate covariance) — absence of red = OK.
 

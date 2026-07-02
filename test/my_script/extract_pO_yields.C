@@ -11,8 +11,11 @@
 //       error via TH1::IntegralAndError, so Sumw2 carries the right sigma).
 //
 // Fitted signal yield = r * (prefit signal integral), error = rErr * (same),
-// because the POI 'r' scales the signal normalization linearly.  For the
-// combined W+Z fit the W signal also carries the shared eff_lumi (r*eff_lumi).
+// because the POI 'r' scales the signal normalization linearly.  This holds
+// for EVERY fit in the two-parameter model (r = W-related scale, dy_norm =
+// DY-related scale): the per-bin fits are simultaneous (W bin + Z_incl)
+// two-channel fits, but 'r' still multiplies only the W-related templates,
+// so no extra factor enters the W signal yield (the old r*eff_lumi is gone).
 //
 // Usage (run under cmsenv, after the fits):
 //   root -b -q 'extract_pO_yields.C("mu","<fitsDir>","<W.root>","<Z.root>","<outDir>")'
@@ -28,10 +31,10 @@
 #include <iostream>
 
 namespace {
-struct FitVals { bool ok; double r,rE,qn,qnE,en,enE,el,elE; };
+struct FitVals { bool ok; double r,rE,dy,dyE,wn,wnE,qn,qnE; };
 
 FitVals readFit(const TString &path) {
-  FitVals v; v.ok=false; v.r=v.rE=v.qn=v.qnE=v.en=v.enE=v.el=v.elE=0;
+  FitVals v; v.ok=false; v.r=v.rE=v.dy=v.dyE=v.wn=v.wnE=v.qn=v.qnE=0;
   TFile *f = TFile::Open(path);
   if (!f || f->IsZombie()) { std::cerr << "[WARN] cannot open fit file: " << path << "\n"; return v; }
   RooFitResult *fr = (RooFitResult *)f->Get("fit_s");
@@ -43,7 +46,7 @@ FitVals readFit(const TString &path) {
     };
     v.ok = (ps.find("r") != 0);
     g("r", v.r, v.rE); g("qcd_norm", v.qn, v.qnE);
-    g("ewk_norm", v.en, v.enE); g("eff_lumi", v.el, v.elE);
+    g("dy_norm", v.dy, v.dyE); g("w_norm", v.wn, v.wnE);
   } else std::cerr << "[WARN] no 'fit_s' in " << path << " (fit failed?)\n";
   f->Close(); delete f;
   return v;
@@ -78,9 +81,12 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
     fy->WriteTObject(h, name, "Overwrite"); // write to fy explicitly, NOT gDirectory
   };
 
+  // Column POSITIONS through fitted_yield_err are load-bearing (xsec_fiducial.C
+  // readBinYields + make_yields_from_csv.C read c[7]/c[8]); dy_norm replaces
+  // the old ewk_norm in place so the column count stays the same.
   std::ofstream csv(TString::Format("%s/%s_W_yields.csv", outDir, chan).Data());
   csv << "region,charge,binning,ybin,r,rErr,signal_prefit,fitted_yield,fitted_yield_err,"
-         "qcd_norm,qcd_normErr,ewk_norm,ewk_normErr\n";
+         "qcd_norm,qcd_normErr,dy_norm,dy_normErr\n";
 
   const char *charges[2]  = {"Wp", "Wm"};
   const char *binnings[2] = {"lab", "fb"};
@@ -95,7 +101,7 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
         double e = (v.ok && Isig > 0) ? v.rE * Isig : 0.0;
         csv << R << "," << charges[ic] << "," << binnings[ib] << "," << iy << ","
             << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << ","
-            << v.qn << "," << v.qnE << "," << v.en << "," << v.enE << "\n";
+            << v.qn << "," << v.qnE << "," << v.dy << "," << v.dyE << "\n";
         // NB: the "h_mt_" name is ONLY the container charge_asym.C / FBratio.C
         // read by (their useMT=true default) -- it is NOT an m_T quantity. The
         // content is the MET-shape-fit signal yield (y = r * MET-template
@@ -109,6 +115,8 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
   std::cout << "[extract] wrote " << outDir << "/" << chan << "_W_yields.csv\n";
 
   // ---- inclusive + Z + combined summary -------------------------------------
+  // xsec_fiducial.C readYield matches (fit, param=="r") -- the extra parameter
+  // rows below (dy_norm / w_norm) are diagnostics and are skipped by it.
   std::ofstream scsv(TString::Format("%s/%s_summary.csv", outDir, chan).Data());
   scsv << "fit,param,value,error,signal_prefit,fitted_yield,fitted_yield_err\n";
   auto dumpW = [&](const TString &R) {
@@ -117,21 +125,24 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
     double Isig = sigPrefit(wIn, R);
     double y = (v.ok && Isig > 0) ? v.r * Isig : 0, e = (v.ok && Isig > 0) ? v.rE * Isig : 0;
     scsv << R << ",r," << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << "\n";
+    scsv << R << ",dy_norm," << v.dy << "," << v.dyE << ",,,\n";
   };
   dumpW("Wp_incl"); dumpW("Wm_incl"); dumpW("W_incl");
-  { // Z standalone (POI r scales Z signal)
+  { // Z standalone (POI r = the DY scale on signal+ztau; w_norm = W bkg scale)
     TString R = "Z_incl";
     FitVals v = readFit(TString::Format("%s/%s/fitDiagnostics_%s.root", fitsDir, R.Data(), R.Data()));
     double Isig = sigPrefit(zIn, R);
     double y = (v.ok && Isig > 0) ? v.r * Isig : 0, e = (v.ok && Isig > 0) ? v.rE * Isig : 0;
     scsv << "Z_incl,r," << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << "\n";
+    scsv << "Z_incl,w_norm," << v.wn << "," << v.wnE << ",,,\n";
   }
-  { // combined W+Z: r (W strength) and the shared eff_lumi
+  { // combined W+Z: r (W-related, both channels) + shared dy_norm (pinned by
+    // the Z peak).  'r' alone scales the W signal, so yield = r * prefit.
     FitVals v = readFit(TString::Format("%s/WZ/fitDiagnostics_WZ.root", fitsDir));
     double Isig = sigPrefit(wIn, "W_incl");
-    double y = (Isig > 0) ? v.r * v.el * Isig : 0; // W signal incl shared eff_lumi
-    scsv << "WZ_combined,r," << v.r << "," << v.rE << "," << Isig << "," << y << ",0\n";
-    scsv << "WZ_combined,eff_lumi," << v.el << "," << v.elE << ",,,\n";
+    double y = (v.ok && Isig > 0) ? v.r * Isig : 0, e = (v.ok && Isig > 0) ? v.rE * Isig : 0;
+    scsv << "WZ_combined,r," << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << "\n";
+    scsv << "WZ_combined,dy_norm," << v.dy << "," << v.dyE << ",,,\n";
   }
   scsv.close();
   std::cout << "[extract] wrote " << outDir << "/" << chan << "_summary.csv\n";
