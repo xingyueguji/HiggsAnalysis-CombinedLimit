@@ -151,7 +151,7 @@ void draw_postfit_pO(const char *fitDiagFile,
   ps.headerX = 0.56;        // channel header shifted left so it fits in-frame
   ps.boxTextSize = 0.028;   // smaller fit-result / info text
   ps.boxX1 = 0.56; ps.boxX2 = 0.93; // info box upper-right, contained in the frame
-  ps.boxY1 = 0.56; ps.boxY2 = 0.76; // sits below the header
+  ps.boxY1 = 0.5; ps.boxY2 = 0.7; // sits below the header
   ps.legX1 = 0.70; ps.legY1 = 0.15; // legend -> lower-right (away from the box)
   ps.legX2 = 0.93; ps.legY2 = 0.48;
   PlotTuner tuner = [&](TCanvas *c, TH1 *h) {
