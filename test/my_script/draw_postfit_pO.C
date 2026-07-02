@@ -150,10 +150,19 @@ void draw_postfit_pO(const char *fitDiagFile,
   ps.normBkgToData = false; // ABSOLUTE postfit yields -- never area-normalize
   ps.headerX = 0.56;        // channel header shifted left so it fits in-frame
   ps.boxTextSize = 0.028;   // smaller fit-result / info text
-  ps.boxX1 = 0.56; ps.boxX2 = 0.93; // info box upper-right, contained in the frame
-  ps.boxY1 = 0.5; ps.boxY2 = 0.7; // sits below the header
-  ps.legX1 = 0.70; ps.legY1 = 0.15; // legend -> lower-right (away from the box)
-  ps.legX2 = 0.93; ps.legY2 = 0.48;
+  // Info box: DrawInfoBox self-sizes at 0.05/line CENTERED in [boxY1,boxY2],
+  // so with the max 6 lines (W fits) it spans exactly this band -- top edge
+  // 0.76 stays clear of subTitle2 (drawn at 0.81, extends down to ~0.77).
+  // Z (mass peak): the peak is centered right under the right-hand text
+  // column, so the box moves to the empty LEFT side (below the CMS label).
+  ps.boxX1 = isW ? 0.56 : 0.17; ps.boxX2 = isW ? 0.93 : 0.54;
+  ps.boxY1 = 0.46; ps.boxY2 = 0.76;
+  // Legend: tight block between the info box (bottom 0.46) and the high-MET
+  // data tail (error-bar tops of the 1-2-event points reach NDC y~0.27).
+  // TLegend auto-shrinks its text to the entry height, so the smaller band
+  // also tightens the entries.
+  ps.legX1 = 0.72; ps.legY1 = 0.275;
+  ps.legX2 = 0.93; ps.legY2 = 0.455;
   PlotTuner tuner = [&](TCanvas *c, TH1 *h) {
     (void)c; if (!h) return;
     if (ps.logy) h->SetMinimum(1.0);

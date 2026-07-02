@@ -16,7 +16,7 @@ Branch: all pO code is on `zheng/po-analysis` (`main` is stock Combine —
 ```bash
 cd HiggsAnalysis-CombinedLimit/test
 cmsenv
-./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [--dry-run] [--no-postfit]
+./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [--dry-run] [--no-postfit] [--draw-only]
 #   PO_PLOTS=/path/to/pO_analysis/plotting/plots   (else --plots-dir, else autodetect)
 ```
 
@@ -29,6 +29,7 @@ cmsenv
 | `all`    | perbin + incl + combined (default) |
 | `--dry-run` | build datacards only (no `cmsenv` needed) |
 | `--no-postfit` | skip postfit plots |
+| `--draw-only` | redraw postfit plots from EXISTING fits (no `combine`/`cmsenv`, only `root`) — e.g. after cosmetic changes to `draw_postfit_pO.C`. Respects channel+mode; needs the `fits/` tree from a previous run (not pulled by `sync_lxplus.sh download` — redraw where the fits ran, then `download --postfit`) |
 
 Per region: `text2workspace` → `combine -M FitDiagnostics --saveShapes
 --saveWithUncertainties` into `pO_fit_out/<chan>/{datacards,fits/<region>,postfit,

@@ -31,6 +31,8 @@
 #   options:
 #     --dry-run         build datacards + check inputs only (no cmsenv needed)
 #     --no-postfit      skip the postfit plots (faster)
+#     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
+#                       use after cosmetic changes to draw_postfit_pO.C)
 #     --plots-dir DIR   analysis plots dir (else $PO_PLOTS, else autodetect)
 #     --out DIR         output root (default test/pO_fit_out)
 #
@@ -42,7 +44,7 @@ set -uo pipefail   # NOT -e: per-bin fit failures must not abort the whole loop
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-CHAN_ARG="both"; MODE="all"; DRYRUN=0; DO_POSTFIT=1
+CHAN_ARG="both"; MODE="all"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
 PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/user/z/zheng/pO_analysis/plotting/plots"
@@ -53,39 +55,46 @@ while [ $# -gt 0 ]; do
     perbin|incl|combined|all)  MODE="$1" ;;
     --dry-run)                 DRYRUN=1 ;;
     --no-postfit)              DO_POSTFIT=0 ;;
+    --draw-only)               DRAWONLY=1 ;;
     --plots-dir)               shift; PO_PLOTS="${1:-}" ;;
     --out)                     shift; OUTROOT="${1:-$OUTROOT}" ;;
-    -h|--help)                 sed -n '2,40p' "$0"; exit 0 ;;
+    -h|--help)                 sed -n '3,40p' "$0"; exit 0 ;;
     *) echo "[ERROR] unknown arg: $1"; exit 1 ;;
   esac
   shift
 done
 
-# ---- locate the analysis plots dir -----------------------------------------
-if [ -z "$PO_PLOTS" ]; then
-  for d in $PO_PLOTS_DEFAULTS; do
-    if [ -f "$d/combine_input_W.root" ]; then PO_PLOTS="$d"; break; fi
-  done
+# ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
+# ---- the combine_input_*.root copies already in the work dir) ---------------
+if [ "$DRAWONLY" -eq 0 ]; then
+  if [ -z "$PO_PLOTS" ]; then
+    for d in $PO_PLOTS_DEFAULTS; do
+      if [ -f "$d/combine_input_W.root" ]; then PO_PLOTS="$d"; break; fi
+    done
+  fi
+  if [ -z "$PO_PLOTS" ] || [ ! -d "$PO_PLOTS" ]; then
+    echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
+    echo "        dir containing combine_input_W.root (run plotting/mtandmet.C +"
+    echo "        dileptonpeak.C first)."
+    exit 2
+  fi
+  echo "[run_pO_fits] plots dir : $PO_PLOTS"
 fi
-if [ -z "$PO_PLOTS" ] || [ ! -d "$PO_PLOTS" ]; then
-  echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
-  echo "        dir containing combine_input_W.root (run plotting/mtandmet.C +"
-  echo "        dileptonpeak.C first)."
-  exit 2
-fi
-echo "[run_pO_fits] plots dir : $PO_PLOTS"
-echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    dry-run: $DRYRUN"
+echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    dry-run: $DRYRUN    draw-only: $DRAWONLY"
 
 # ---- cmsenv check -----------------------------------------------------------
 HAVE_COMBINE=1
 command -v combine          >/dev/null 2>&1 || HAVE_COMBINE=0
 command -v text2workspace.py >/dev/null 2>&1 || HAVE_COMBINE=0
-if [ "$DRYRUN" -eq 0 ] && [ "$HAVE_COMBINE" -eq 0 ]; then
+if [ "$DRYRUN" -eq 0 ] && [ "$DRAWONLY" -eq 0 ] && [ "$HAVE_COMBINE" -eq 0 ]; then
   echo "[ERROR] combine / text2workspace.py not on PATH -- did you cmsenv?"
   echo "        (run with --dry-run to only build datacards.)"
   exit 3
 fi
 command -v root >/dev/null 2>&1 || { echo "[WARN] root not on PATH: extraction/postfit will be skipped."; }
+if [ "$DRAWONLY" -eq 1 ] && ! command -v root >/dev/null 2>&1; then
+  echo "[ERROR] --draw-only needs root on PATH."; exit 3
+fi
 
 # ---- region list for a mode -------------------------------------------------
 build_regions() {  # echoes space-separated region labels (excludes the WZ combo)
@@ -145,14 +154,39 @@ run_channel() {
   fi
   echo ""
   echo "================ channel: $chan ================"
+  WORK="$OUTROOT/$chan"; DCD="$WORK/datacards"; FITS="$WORK/fits"; POST="$WORK/postfit"; SUMM="$WORK/summary"
+  ABS_W="$WORK/combine_input_W.root"; ABS_Z="$WORK/combine_input_Z.root"
+
+  # ---- draw-only: redraw postfit plots from an EXISTING fit run --------------
+  # Reuses the work-dir input copies (physical axes) + fits/<region>/ from the
+  # previous run; regenerates nothing else.
+  if [ "$DRAWONLY" -eq 1 ]; then
+    if [ ! -f "$ABS_W" ]; then
+      echo "[ERROR] $ABS_W missing -- no previous fit run for '$chan' (run the full pipeline first)."
+      return
+    fi
+    nfd=$(find "$FITS" -name 'fitDiagnostics_*.root' 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$nfd" -eq 0 ]; then
+      echo "[ERROR] no fitDiagnostics_*.root under $FITS -- --draw-only needs the fits/"
+      echo "        tree from an earlier run (NB 'sync_lxplus.sh download' does NOT pull fits/;"
+      echo "        redraw where the fits ran, then download --postfit)."
+      return
+    fi
+    mkdir -p "$POST"
+    REGIONS="$(build_regions "$MODE")"
+    echo "[draw-only] $nfd fit result(s) under fits/; redrawing $(echo $REGIONS | wc -w | tr -d ' ') region(s) + combined: $(want_combined "$MODE" && echo yes || echo no) ..."
+    for R in $REGIONS; do postfit_region "$R" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; done
+    if want_combined "$MODE" && [ -f "$ABS_Z" ]; then postfit_region "WZ" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; fi
+    echo "[done] $chan -> $POST"
+    return
+  fi
+
   if [ ! -f "$WIN_SRC" ]; then echo "[ERROR] missing $WIN_SRC"; return; fi
   if [ ! -f "$ZIN_SRC" ]; then echo "[WARN] missing $ZIN_SRC (Z + combined fits will be skipped)"; fi
 
-  WORK="$OUTROOT/$chan"; DCD="$WORK/datacards"; FITS="$WORK/fits"; POST="$WORK/postfit"; SUMM="$WORK/summary"
   mkdir -p "$WORK" "$DCD" "$FITS" "$POST" "$SUMM"
   cp -f "$WIN_SRC" "$WORK/combine_input_W.root"
   [ -f "$ZIN_SRC" ] && cp -f "$ZIN_SRC" "$WORK/combine_input_Z.root"
-  ABS_W="$WORK/combine_input_W.root"; ABS_Z="$WORK/combine_input_Z.root"
 
   # absolute-path datacards so combine resolves shapes from any CWD
   /bin/bash "$MYS/make_pO_datacards.sh" "$ABS_W" "$ABS_Z" "$DCD"
