@@ -10,6 +10,7 @@
 #include "TStyle.h"
 #include "TString.h"
 #include <algorithm>
+#include <cmath>
 
 // Global plot style: thicken the frame (the box / "bezel" around every plot).
 // This runs once when the header is loaded, so it applies to ALL pads and
@@ -76,6 +77,18 @@ struct PlotStyle
     //   true  -> scale the MC stack to the data integral (shape comparison)
     //   false -> draw the MC at its absolute (already-scaled) yield
     bool normBkgToData = true;
+
+    // pull sub-pad in SaveNicePlot1D_WithBkg: per-bin (data - MC_total)/sigma,
+    // sigma^2 = MC_total + sigma_MCstat^2 (Poisson variance of the data around
+    // the prediction + MC statistical error), drawn as zero-anchored bars
+    // under the main pad. The canvas stays NEAR-SQUARE: its height grows only
+    // by pullCanvasScale (not by the full pull-pad fraction), so the main pad
+    // compresses a little vertically. All fonts/positions are pad-relative, so
+    // the main-plot layout scales consistently; only the aspect changes.
+    bool pullPad = false;      // enable the pull sub-pad
+    double pullSplit = 0.30;   // fraction of the canvas given to the pull pad
+    double pullCanvasScale = 1.125; // canvas-height multiplier when pullPad is on
+    double pullYRange = -1.0;  // fixed symmetric |pull| axis; <0 -> auto (max(3, 1.15*max|pull|))
 };
 
 // -----------------------------
@@ -395,12 +408,33 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
 
     g->Draw("P SAME"); // data points back on top of the bands
 
+    // >>>>>>>>>>>>>>>> TEMPORARY: "Projection with Electrons" band >>>>>>>>>>>>>>>>
+    // Overlays the data with shrunk error bars (errors/1.4 ~ errors/sqrt(2), i.e.
+    // the stat reach with ~2x the data). To REMOVE later: set kShowProjection to
+    // false (one line), or delete this whole block AND its legend entry below.
+    const bool kShowProjection = false;
+    TGraphErrors *g_stat2x = nullptr;
+    if (kShowProjection)
+    {
+        g_stat2x = (TGraphErrors *)g->Clone(Form("%s_stat2x", g->GetName()));
+        const double scale = 1.0 / 1.4; // ~1/sqrt(2)
+        for (int i = 0; i < g_stat2x->GetN(); ++i)
+            g_stat2x->SetPointError(i, 0, g_stat2x->GetErrorY(i) * scale);
+        g_stat2x->SetLineColor(kRed + 1);
+        g_stat2x->SetMarkerSize(0);
+        g_stat2x->SetLineWidth(3);
+        g_stat2x->Draw("E SAME");
+    }
+    // <<<<<<<<<<<<<<<<<<<< end temporary projection block <<<<<<<<<<<<<<<<<<<<<<<<<
+
     TLegend *leg = new TLegend(0.20, 0.15, 0.45, 0.40);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
     leg->SetTextFont(42);
     leg->SetTextSize(0.033);
     leg->AddEntry(g, "Data", "p");
+    if (kShowProjection && g_stat2x) // TEMPORARY -- remove with the projection block above
+        leg->AddEntry(g_stat2x, "Projection with Electrons", "l");
     for (int i = 0; i < 4; ++i)
         if (models[i]) leg->AddEntry(models[i], mname[i], "f");
     leg->Draw();
@@ -583,10 +617,35 @@ static void SaveNicePlot1D_WithBkg(
 
     gStyle->SetOptStat(ps.showStats ? 1110 : 0);
 
-    TCanvas *c = new TCanvas(Form("c_%s", h->GetName()), "", ps.w, ps.h);
+    // With the pull pad the canvas grows only slightly (pullCanvasScale), so
+    // the overall shape stays near-square; the main pad absorbs the rest by
+    // compressing a little (fonts/positions are pad-relative and follow).
+    const int canvasH = ps.pullPad
+                            ? (int)((double)ps.h * ps.pullCanvasScale + 0.5)
+                            : ps.h;
+    TCanvas *c = new TCanvas(Form("c_%s", h->GetName()), "", ps.w, canvasH);
     ApplyCanvasStyle(c, ps);
 
-    c->cd();
+    TPad *pTop = nullptr, *pBot = nullptr;
+    if (ps.pullPad)
+    {
+        pTop = new TPad(Form("pTop_%s", h->GetName()), "", 0.0, ps.pullSplit, 1.0, 1.0);
+        pBot = new TPad(Form("pBot_%s", h->GetName()), "", 0.0, 0.0, 1.0, ps.pullSplit);
+        pTop->SetLeftMargin(ps.lm);  pTop->SetRightMargin(ps.rm);
+        pTop->SetTopMargin(ps.tm);   pTop->SetBottomMargin(0.025);
+        pBot->SetLeftMargin(ps.lm);  pBot->SetRightMargin(ps.rm);
+        pBot->SetTopMargin(0.045);   pBot->SetBottomMargin(0.34);
+        pTop->SetFrameLineWidth(ps.FrameLineWidth);
+        pBot->SetFrameLineWidth(ps.FrameLineWidth);
+        if (ps.ticks) { pTop->SetTicks(1, 1); pBot->SetTicks(1, 1); }
+        pTop->SetLogy(ps.logy);
+        c->cd();
+        pTop->Draw();
+        pBot->Draw();
+        pTop->cd();
+    }
+    else
+        c->cd();
 
     //--------------------------------------------------
     // 1️⃣ Compute normalization
@@ -639,6 +698,12 @@ static void SaveNicePlot1D_WithBkg(
     // 4️⃣ Draw data on top
     //--------------------------------------------------
     ApplyHistStyle(h, ps, xTitle, yTitle);
+    if (ps.pullPad)
+    {
+        // x axis moves to the pull pad
+        h->GetXaxis()->SetLabelSize(0.0);
+        h->GetXaxis()->SetTitleSize(0.0);
+    }
 
     h->SetMarkerStyle(20);
     h->SetMarkerSize(1.2);
@@ -686,9 +751,109 @@ static void SaveNicePlot1D_WithBkg(
     if (tuner)
         tuner(c, h);
 
-    CMS_lumi(c, 13, 10);
+    TPad *mainPad = ps.pullPad ? pTop : (TPad *)c;
+    CMS_lumi(mainPad, 13, 10);
+    mainPad->RedrawAxis(); // redraw frame + ticks on top of the stacked histograms
 
-    c->RedrawAxis(); // redraw frame + ticks on top of the stacked histograms
+    //--------------------------------------------------
+    // 8️⃣ Pull sub-pad: (data - MC_total)/sigma, zero-anchored bars
+    //--------------------------------------------------
+    if (ps.pullPad)
+    {
+        // MC total with full MC-stat errors (bkgs are already scaled above;
+        // Add() propagates the Sumw2 arrays).
+        TH1 *mcTot = nullptr;
+        for (auto b : bkgs)
+        {
+            if (!b)
+                continue;
+            if (!mcTot)
+            {
+                mcTot = (TH1 *)b->Clone(Form("%s_pullMCtot", h->GetName()));
+                mcTot->SetDirectory(nullptr);
+            }
+            else
+                mcTot->Add(b);
+        }
+
+        TH1 *hPull = (TH1 *)h->Clone(Form("%s_pull", h->GetName()));
+        hPull->SetDirectory(nullptr);
+        hPull->Reset();
+
+        double maxAbs = 0.0;
+        if (mcTot)
+        {
+            for (int i = 1; i <= h->GetNbinsX(); ++i)
+            {
+                const double d = h->GetBinContent(i);
+                const double m = mcTot->GetBinContent(i), em = mcTot->GetBinError(i);
+                if (d == 0.0 && m == 0.0)
+                    continue; // nothing in this bin at all
+                // Poisson pull under H0 "data fluctuates around the prediction":
+                // sigma^2 = m (expected Poisson variance of the data) + MC-stat^2.
+                // Using the OBSERVED data error instead (sqrt(d), 0 for empty
+                // bins) blows up empty-data bins against a small-error MC tail.
+                const double s2 = std::max(m, 0.0) + em * em;
+                if (s2 <= 0.0)
+                    continue; // no prediction at all -> pull undefined
+                const double pull = (d - m) / std::sqrt(s2);
+                hPull->SetBinContent(i, pull);
+                hPull->SetBinError(i, 0.0);
+                maxAbs = std::max(maxAbs, std::fabs(pull));
+            }
+        }
+
+        pBot->cd();
+
+        const double yr = (ps.pullYRange > 0.0) ? ps.pullYRange
+                                                : std::max(3.0, 1.15 * maxAbs);
+        hPull->SetTitle("");
+        hPull->SetMinimum(-yr);
+        hPull->SetMaximum(yr);
+        hPull->SetFillColorAlpha(kAzure + 1, 0.7);
+        hPull->SetLineColor(kAzure + 2);
+        hPull->SetLineWidth(1);
+        hPull->SetStats(false);
+
+        // Pad-relative font sizes: scale by the pad-height ratio so the pull
+        // pad text matches the main pad visually.
+        const double sf = (1.0 - ps.pullSplit) / ps.pullSplit;
+        hPull->GetXaxis()->SetTitle(xTitle.c_str());
+        hPull->GetYaxis()->SetTitle("(Data#minusMC)/#sigma");
+        hPull->GetXaxis()->SetTitleFont(ps.font);
+        hPull->GetYaxis()->SetTitleFont(ps.font);
+        hPull->GetXaxis()->SetLabelFont(ps.font);
+        hPull->GetYaxis()->SetLabelFont(ps.font);
+        hPull->GetXaxis()->SetTitleSize(ps.xTitleSize * sf);
+        hPull->GetYaxis()->SetTitleSize(ps.yTitleSize * sf * 0.85);
+        hPull->GetXaxis()->SetLabelSize(ps.xLabelSize * sf);
+        hPull->GetYaxis()->SetLabelSize(ps.yLabelSize * sf);
+        hPull->GetXaxis()->SetTitleOffset(1.05);
+        hPull->GetYaxis()->SetTitleOffset(ps.yTitleOffset / sf);
+        hPull->GetYaxis()->SetNdivisions(505);
+        hPull->GetYaxis()->CenterTitle(true);
+
+        hPull->Draw("B"); // bars anchored at zero (handles negative pulls)
+
+        const double x1 = hPull->GetXaxis()->GetXmin();
+        const double x2 = hPull->GetXaxis()->GetXmax();
+        TLine *l0 = new TLine(x1, 0.0, x2, 0.0);
+        l0->SetLineStyle(2);
+        l0->SetLineColor(kRed + 1);
+        l0->Draw("SAME");
+        for (const double g : {-2.0, 2.0}) // +-2 sigma guides
+        {
+            if (g <= -yr || g >= yr)
+                continue;
+            TLine *lg = new TLine(x1, g, x2, g);
+            lg->SetLineStyle(3);
+            lg->SetLineColor(kGray + 2);
+            lg->Draw("SAME");
+        }
+        pBot->RedrawAxis();
+        c->cd();
+    }
+
     c->Modified();
     c->Update();
 

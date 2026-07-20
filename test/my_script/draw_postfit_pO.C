@@ -148,6 +148,7 @@ void draw_postfit_pO(const char *fitDiagFile,
   ps.showStats = false;
   ps.logy = isW;            // log-y for the MET tails; linear for the Z peak
   ps.normBkgToData = false; // ABSOLUTE postfit yields -- never area-normalize
+  ps.pullPad = true;        // (data-postfit MC)/sigma bars in a sub-pad below
   ps.headerX = 0.56;        // channel header shifted left so it fits in-frame
   ps.boxTextSize = 0.028;   // smaller fit-result / info text
   // Info box: DrawInfoBox self-sizes at 0.05/line CENTERED in [boxY1,boxY2],
