@@ -969,7 +969,12 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
                             const PlotStyle &ps = PlotStyle(),
                             bool normToData = true,
                             const std::string &dataLabel = "Data",
-                            const std::string &mcLabel = "Signal MC")
+                            const std::string &mcLabel = "Signal MC",
+                            // Ratio-pad y-axis label. Override when the two
+                            // inputs are NOT data and MC (e.g. the qcd_abcd.C
+                            // anti-iso slice check compares two data-derived
+                            // sideband slices) so the pad doesn't mislabel them.
+                            const std::string &ratioLabel = "Data / MC")
 {
     if (!hData || !hMC)
         return;
@@ -1055,7 +1060,7 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
     hr->SetLineColor(kBlack);
     hr->SetMarkerColor(kBlack);
 
-    hr->GetYaxis()->SetTitle("Data / MC");
+    hr->GetYaxis()->SetTitle(ratioLabel.c_str());
     hr->GetXaxis()->SetTitle(xTitle.c_str());
 
     // The bottom pad is ~0.3 of the height, so scale fonts up to match the top.

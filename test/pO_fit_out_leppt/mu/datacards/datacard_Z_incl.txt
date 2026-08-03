@@ -1,0 +1,25 @@
+# Auto-generated -- Z inclusive (dilepton mass peak discriminant).
+imax 1
+jmax 3
+kmax *
+------------
+shapes data_obs Z_incl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt/mu/combine_input_Z.root Z_incl/data_obs
+shapes signal   Z_incl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt/mu/combine_input_Z.root Z_incl/signal
+shapes w        Z_incl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt/mu/combine_input_Z.root Z_incl/w
+shapes wtau     Z_incl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt/mu/combine_input_Z.root Z_incl/wtau
+shapes ztau     Z_incl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt/mu/combine_input_Z.root Z_incl/ztau
+------------
+bin          Z_incl
+observation  -1
+------------
+bin      Z_incl    Z_incl  Z_incl  Z_incl
+process  signal    w       wtau    ztau
+process  0         1       2       3
+rate     -1        -1      -1      -1
+------------
+# TWO-parameter model, Z card: the POI 'r' IS the DY scale (signal, index 0 +
+# ztau tied to the same 'r'); 'w_norm' scales the W-related backgrounds
+# (w + wtau).
+r      rateParam Z_incl ztau 1
+w_norm rateParam Z_incl w    1 [0,10]
+w_norm rateParam Z_incl wtau 1

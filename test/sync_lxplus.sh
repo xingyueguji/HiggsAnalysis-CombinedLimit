@@ -6,9 +6,13 @@
 #
 # Usage:
 #   ./sync_lxplus.sh upload           # inputs + scripts (everything needed to fit)
-#   ./sync_lxplus.sh upload-inputs    # only the 4 structured Combine input files
+#   ./sync_lxplus.sh upload-inputs    # only the structured Combine input files
+#                                     # (4 required MET/Z + up to 4 optional
+#                                     #  lepton-pT variant W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
-#   ./sync_lxplus.sh download         # pull summary/ (fitted yields + CSVs), both chans
+#   ./sync_lxplus.sh download         # pull summary/ (fitted yields + CSVs), both chans,
+#                                     # from ALL discriminant out-trees present
+#                                     # (pO_fit_out, pO_fit_out_leppt, pO_fit_out_leppt_mt40)
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
 # Options (any command):
 #   --chan mu|ele   restrict to one channel (default: both)
@@ -43,7 +47,7 @@ while [ $# -gt 0 ]; do
     --chan) shift; CHANS="${1:-}";;
     --postfit) POSTFIT=1;;
     --dry-run|-n) DRY="-n";;
-    -h|--help) sed -n '2,30p' "$0"; exit 0;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0;;
     *) echo "[ERROR] unknown option: $1"; exit 1;;
   esac
   shift
@@ -68,6 +72,7 @@ err=0
 upload_inputs() {
   echo "== upload structured Combine inputs -> $LX:$ANA_LX/plotting/ =="
   local missing=0
+  # required: the PF-MET W inputs + the Z inputs
   for f in plots/combine_input_W.root plots/combine_input_Z.root \
            plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root; do
     [ -f "$ANA_LOCAL/plotting/$f" ] || { echo "[MISS] $ANA_LOCAL/plotting/$f"; missing=1; }
@@ -76,11 +81,16 @@ upload_inputs() {
     echo "[ERROR] missing input(s) -- run Steps 1-3 (skim, run_ngen, qcd_abcd, mtandmet/dileptonpeak) first."
     err=1; return
   fi
+  # optional: the lepton-pT discriminant variants (2026-07-30). Uploaded when
+  # present; a missing variant is only a note, not an error.
+  SEND="plots/combine_input_W.root plots/combine_input_Z.root plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root"
+  for f in plots/combine_input_W_leppt.root plots/combine_input_W_leppt_mt40.root \
+           plots/Elec/combine_input_W_leppt.root plots/Elec/combine_input_W_leppt_mt40.root; do
+    if [ -f "$ANA_LOCAL/plotting/$f" ]; then SEND="$SEND $f"
+    else echo "[note] optional variant not built (skipped): $f"; fi
+  done
   rmkdir "$ANA_LX/plotting"
-  ( cd "$ANA_LOCAL/plotting" && run --relative \
-      plots/combine_input_W.root      plots/combine_input_Z.root \
-      plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root \
-      "$LX:$ANA_LX/plotting/" ) || err=1
+  ( cd "$ANA_LOCAL/plotting" && run --relative $SEND "$LX:$ANA_LX/plotting/" ) || err=1
 }
 
 upload_scripts() {
@@ -98,25 +108,29 @@ upload_scripts() {
 }
 
 download_results() {
-  echo "== download fit results <- $LX:$FORK_LX/test/pO_fit_out/ =="
+  # one out-tree per discriminant: "" (PF MET), _leppt, _leppt_mt40
   local got=0
-  for c in $CHANS; do
-    local rsum="$FORK_LX/test/pO_fit_out/$c/summary"
-    if rexists "$rsum"; then
-      mkdir -p "$FORK_LOCAL/test/pO_fit_out/$c/summary"
-      run "$LX:$rsum/" "$FORK_LOCAL/test/pO_fit_out/$c/summary/" && got=1 || err=1
-    else
-      echo "[skip] no remote summary/ for '$c' (fit not run for that channel?)"
-    fi
-    if [ "$POSTFIT" -eq 1 ]; then
-      local rpost="$FORK_LX/test/pO_fit_out/$c/postfit"
-      if rexists "$rpost"; then
-        mkdir -p "$FORK_LOCAL/test/pO_fit_out/$c/postfit"
-        run "$LX:$rpost/" "$FORK_LOCAL/test/pO_fit_out/$c/postfit/" || err=1
+  for sfx in "" "_leppt" "_leppt_mt40"; do
+    local tree="pO_fit_out${sfx}"
+    echo "== download fit results <- $LX:$FORK_LX/test/$tree/ =="
+    for c in $CHANS; do
+      local rsum="$FORK_LX/test/$tree/$c/summary"
+      if rexists "$rsum"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/$c/summary"
+        run "$LX:$rsum/" "$FORK_LOCAL/test/$tree/$c/summary/" && got=1 || err=1
       else
-        echo "[skip] no remote postfit/ for '$c' (ran with --no-postfit, or plots not made)"
+        echo "[skip] no remote $tree/$c/summary (fit not run for that channel/discriminant?)"
       fi
-    fi
+      if [ "$POSTFIT" -eq 1 ]; then
+        local rpost="$FORK_LX/test/$tree/$c/postfit"
+        if rexists "$rpost"; then
+          mkdir -p "$FORK_LOCAL/test/$tree/$c/postfit"
+          run "$LX:$rpost/" "$FORK_LOCAL/test/$tree/$c/postfit/" || err=1
+        else
+          echo "[skip] no remote $tree/$c/postfit (ran with --no-postfit, or plots not made)"
+        fi
+      fi
+    done
   done
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"
 }
@@ -138,9 +152,13 @@ case "$CMD" in
     echo "[sync_lxplus] upload done. Next, on lxplus:"
     echo "    ssh $LX"
     echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all" ;;
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all"
+    echo "    # lepton-pT discriminant variants (2026-07-30):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --disc leppt"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --disc leppt_mt40" ;;
   download)
-    echo "[sync_lxplus] download done. Next, locally:"
+    echo "[sync_lxplus] download done. Next, locally (for the lepton-pT variants,"
+    echo "swap pO_fit_out for pO_fit_out_leppt or pO_fit_out_leppt_mt40):"
     echo "    cd $ANA_LOCAL/analysis"
     for c in $CHANS; do
       echo "    root -l -q 'charge_asym.C+(\"$FORK_LOCAL/test/pO_fit_out/$c/summary/${c}_fitted_yields.root\")'"

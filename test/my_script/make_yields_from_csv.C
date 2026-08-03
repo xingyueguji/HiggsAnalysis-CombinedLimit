@@ -4,7 +4,8 @@
 // have the CSV but the .root came out empty (no need to re-run the fits), or to
 // regenerate the analysis-consumer histos locally.
 //
-// Produces the single-bin h_mt_W{p,m}_y{0..11}(_FB) histograms (full integral =
+// Produces the single-bin h_yield_W{p,m}_y{0..11}(_FB) histograms, plus the
+// deprecated h_mt_* aliases of the same content (full integral =
 // fitted yield, Sumw2 error = fit uncertainty) that analysis/charge_asym.C and
 // analysis/FBratio.C read directly.
 //
@@ -40,16 +41,20 @@ void make_yields_from_csv(const char *csvPath, const char *outRoot) {
     int iy = std::atoi(c[3].c_str());
     double y = std::atof(c[7].c_str());   // fitted_yield
     double e = std::atof(c[8].c_str());   // fitted_yield_err
-    // "h_mt_" is just the container name charge_asym.C/FBratio.C read by; the
-    // content is the MET-shape-fit yield, NOT an m_T quantity (no m_T anywhere).
-    TString nm = TString::Format("h_mt_%s_y%d%s", charge.c_str(), iy, (binning == "fb" ? "_FB" : ""));
+    // The content is the MET-shape-fit yield, NOT an m_T quantity. PRIMARY name
+    // is discriminant-neutral (h_yield_*); h_mt_* is kept as a deprecated alias
+    // for readers predating 2026-07-30 (see extract_pO_yields.C).
+    const TString suffix = TString::Format("%s_y%d%s", charge.c_str(), iy, (binning == "fb" ? "_FB" : ""));
     fy->cd();
-    TH1D *h = new TH1D(nm, nm, 1, 0.0, 1.0);
-    h->Sumw2();
-    h->SetBinContent(1, y);
-    h->SetBinError(1, e);
-    h->SetDirectory(fy);
-    fy->WriteTObject(h, nm, "Overwrite");
+    for (const TString &nm : {TString("h_yield_") + suffix, TString("h_mt_") + suffix})
+    {
+        TH1D *h = new TH1D(nm, nm, 1, 0.0, 1.0);
+        h->Sumw2();
+        h->SetBinContent(1, y);
+        h->SetBinError(1, e);
+        h->SetDirectory(fy);
+        fy->WriteTObject(h, nm, "Overwrite");
+    }
     ++n;
   }
   fy->Close(); delete fy;

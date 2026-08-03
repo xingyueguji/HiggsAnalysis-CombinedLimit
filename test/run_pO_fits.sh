@@ -29,6 +29,15 @@
 #   ./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [options]
 #     channel  (default both)   mode (default all)
 #   options:
+#     --disc met|leppt|leppt_mt40
+#                       W discriminant (default met = PF MET shape).
+#                       leppt      = lepton pT, plain W selection
+#                       leppt_mt40 = lepton pT with the pT>25 && m_T>40 selection
+#                       Reads combine_input_W[_leppt[_mt40]].root and writes to
+#                       pO_fit_out[_leppt[_mt40]]/ (unless --out). Z channel and
+#                       fit model identical; qcd_norm stays free (NB the pT
+#                       variants lack the low-MET QCD anchor -> weaker qcd_norm
+#                       constraint).
 #     --dry-run         build datacards + check inputs only (no cmsenv needed)
 #     --no-postfit      skip the postfit plots (faster)
 #     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
@@ -45,6 +54,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
 CHAN_ARG="both"; MODE="all"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0
+DISC="met"; OUT_SET=0
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
 PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/user/z/zheng/pO_analysis/plotting/plots"
@@ -57,30 +67,43 @@ while [ $# -gt 0 ]; do
     --no-postfit)              DO_POSTFIT=0 ;;
     --draw-only)               DRAWONLY=1 ;;
     --plots-dir)               shift; PO_PLOTS="${1:-}" ;;
-    --out)                     shift; OUTROOT="${1:-$OUTROOT}" ;;
-    -h|--help)                 sed -n '3,40p' "$0"; exit 0 ;;
+    --disc)                    shift; DISC="${1:?--disc needs a value: met|leppt|leppt_mt40}" ;;
+    --out)                     shift; OUTROOT="${1:?--out needs a directory}"; OUT_SET=1 ;;
+    -h|--help)                 sed -n '3,49p' "$0"; exit 0 ;;
     *) echo "[ERROR] unknown arg: $1"; exit 1 ;;
   esac
   shift
 done
+
+# ---- resolve the discriminant variant ---------------------------------------
+case "$DISC" in
+  met)        DSUF="";            XT="PF MET (GeV)"        ;;
+  leppt)      DSUF="_leppt";      XT="Lepton p_{T} (GeV)"  ;;
+  leppt_mt40) DSUF="_leppt_mt40"; XT="Lepton p_{T} (GeV)"  ;;
+  *) echo "[ERROR] --disc must be met|leppt|leppt_mt40 (got '$DISC')"; exit 1 ;;
+esac
+YT="Events / 2.0 GeV"   # MET and lepton-pT templates are both 2 GeV bins
+WINNAME="combine_input_W${DSUF}.root"
+# legacy output path for met; suffixed tree for the variants (unless --out given)
+if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
 
 # ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
 # ---- the combine_input_*.root copies already in the work dir) ---------------
 if [ "$DRAWONLY" -eq 0 ]; then
   if [ -z "$PO_PLOTS" ]; then
     for d in $PO_PLOTS_DEFAULTS; do
-      if [ -f "$d/combine_input_W.root" ]; then PO_PLOTS="$d"; break; fi
+      if [ -f "$d/$WINNAME" ]; then PO_PLOTS="$d"; break; fi
     done
   fi
   if [ -z "$PO_PLOTS" ] || [ ! -d "$PO_PLOTS" ]; then
     echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
-    echo "        dir containing combine_input_W.root (run plotting/mtandmet.C +"
+    echo "        dir containing $WINNAME (run plotting/mtandmet.C +"
     echo "        dileptonpeak.C first)."
     exit 2
   fi
   echo "[run_pO_fits] plots dir : $PO_PLOTS"
 fi
-echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    dry-run: $DRYRUN    draw-only: $DRAWONLY"
+echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY"
 
 # ---- cmsenv check -----------------------------------------------------------
 HAVE_COMBINE=1
@@ -135,10 +158,10 @@ postfit_region() {  # $1=region(label/fitChannel) $2=fits $3=post $4=absW $5=abs
     Z_incl)
       root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Z_incl\",\"$AZ\",\"Z_incl\",\"$POST/$R\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"$R (postfit)\",false)" >/dev/null 2>&1 ;;
     WZ)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Wincl\",\"$AW\",\"W_incl\",\"$POST/WZ_Wincl\",\"PF MET (GeV)\",\"Events / 2.0 GeV\",\"$WL\",\"W+Z fit (postfit)\",true)"  >/dev/null 2>&1
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Wincl\",\"$AW\",\"W_incl\",\"$POST/WZ_Wincl\",\"$XT\",\"$YT\",\"$WL\",\"W+Z fit (postfit)\",true)"  >/dev/null 2>&1
       root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Zincl\",\"$AZ\",\"Z_incl\",\"$POST/WZ_Zincl\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"W+Z fit (postfit)\",false)" >/dev/null 2>&1 ;;
     *)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$R\",\"$AW\",\"$R\",\"$POST/$R\",\"PF MET (GeV)\",\"Events / 2.0 GeV\",\"$WL\",\"$R (postfit)\",true)" >/dev/null 2>&1 ;;
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$R\",\"$AW\",\"$R\",\"$POST/$R\",\"$XT\",\"$YT\",\"$WL\",\"$R (postfit)\",true)" >/dev/null 2>&1 ;;
   esac
 }
 
@@ -146,10 +169,10 @@ postfit_region() {  # $1=region(label/fitChannel) $2=fits $3=post $4=absW $5=abs
 run_channel() {
   chan="$1"
   if [ "$chan" = "ele" ]; then
-    WIN_SRC="$PO_PLOTS/Elec/combine_input_W.root"; ZIN_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
+    WIN_SRC="$PO_PLOTS/Elec/$WINNAME"; ZIN_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
     WL="W #rightarrow e #nu"; ZL="Z #rightarrow e e"
   else
-    WIN_SRC="$PO_PLOTS/combine_input_W.root"; ZIN_SRC="$PO_PLOTS/combine_input_Z.root"
+    WIN_SRC="$PO_PLOTS/$WINNAME"; ZIN_SRC="$PO_PLOTS/combine_input_Z.root"
     WL="W #rightarrow #mu #nu"; ZL="Z #rightarrow #mu #mu"
   fi
   echo ""
@@ -189,7 +212,7 @@ run_channel() {
   [ -f "$ZIN_SRC" ] && cp -f "$ZIN_SRC" "$WORK/combine_input_Z.root"
 
   # absolute-path datacards so combine resolves shapes from any CWD
-  /bin/bash "$MYS/make_pO_datacards.sh" "$ABS_W" "$ABS_Z" "$DCD"
+  /bin/bash "$MYS/make_pO_datacards.sh" "$ABS_W" "$ABS_Z" "$DCD" "$DISC"
 
   if [ "$DRYRUN" -eq 1 ]; then
     echo "[dry-run] datacards in $DCD ; skipping fits."

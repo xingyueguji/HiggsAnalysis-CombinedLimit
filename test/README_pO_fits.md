@@ -17,6 +17,25 @@ Branch: all pO code is on `zheng/po-analysis` (`main` is stock Combine —
 cd HiggsAnalysis-CombinedLimit/test
 cmsenv
 ./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [--dry-run] [--no-postfit] [--draw-only]
+
+# W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default met).
+# leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
+# pO_fit_out_leppt[_mt40]/; the Z channel and the fit model are unchanged and
+# qcd_norm stays free (the pT variants lack the low-MET QCD anchor, so expect a
+# weaker qcd_norm constraint / larger r-qcd correlation).
+./run_pO_fits.sh both all --disc leppt_mt40
+
+# *** WARNING: carry the SAME --disc through the WHOLE workflow of a variant ***
+# The out-trees have no discriminant marker (the coupling is only the dir
+# suffix), so mixed steps corrupt/mislabel silently:
+#   - --draw-only MUST repeat the same --disc (it picks the out-tree AND the
+#     x-title; forget it and lepton-pT plots get relabeled "PF MET (GeV)").
+#     Same rule whenever --out is used.
+#   - sync_lxplus.sh download needs NO flag (sweeps all three out-trees).
+#   - charge_asym/FBratio: feed the MATCHING tree's <chan>_fitted_yields.root
+#     (pO_fit_out_leppt[_mt40]/...). The histos inside are named identically
+#     across variants (h_yield_*) -- the tree name is the only label.
+# Full workflow + physics notes: the analysis repo's README.md, Module 4.
 #   PO_PLOTS=/path/to/pO_analysis/plotting/plots   (else --plots-dir, else autodetect)
 ```
 

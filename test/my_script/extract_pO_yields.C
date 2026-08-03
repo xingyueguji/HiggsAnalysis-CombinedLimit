@@ -4,8 +4,10 @@
 //   (b) single-bin histograms named EXACTLY as analysis/charge_asym.C and
 //       analysis/FBratio.C expect, so those macros consume FITTED yields with no
 //       code change (they take the input file as their first argument):
-//         lab bins -> h_mt_Wp_y{0..11}    / h_mt_Wm_y{0..11}
-//         FB  bins -> h_mt_Wp_y{0..11}_FB / h_mt_Wm_y{0..11}_FB
+//         lab bins -> h_yield_Wp_y{0..11}    / h_yield_Wm_y{0..11}
+//         FB  bins -> h_yield_Wp_y{0..11}_FB / h_yield_Wm_y{0..11}_FB
+//         (+ the deprecated h_mt_* aliases of the same content: the fit
+//          discriminant is PF MET, so the old m_T-flavoured name misled)
 //       Each is a 1-bin TH1D whose full-range integral == fitted signal yield and
 //       whose Sumw2 error == the fit uncertainty (charge_asym/FBratio read the
 //       error via TH1::IntegralAndError, so Sumw2 carries the right sigma).
@@ -102,12 +104,15 @@ void extract_pO_yields(const char *chan,        // "mu" or "ele" (label only)
         csv << R << "," << charges[ic] << "," << binnings[ib] << "," << iy << ","
             << v.r << "," << v.rE << "," << Isig << "," << y << "," << e << ","
             << v.qn << "," << v.qnE << "," << v.dy << "," << v.dyE << "\n";
-        // NB: the "h_mt_" name is ONLY the container charge_asym.C / FBratio.C
-        // read by (their useMT=true default) -- it is NOT an m_T quantity. The
-        // content is the MET-shape-fit signal yield (y = r * MET-template
-        // integral). Nothing m_T-based enters the FB ratio / charge asymmetry.
-        TString hname = TString::Format("h_mt_%s_y%d%s", charges[ic], iy, (ib == 1 ? "_FB" : ""));
-        makeYieldHist(hname, y, e);
+        // The content is the MET-shape-fit signal yield (y = r * MET-template
+        // integral) -- nothing m_T-based enters the FB ratio / charge asymmetry.
+        // PRIMARY name is therefore discriminant-neutral, h_yield_*; the old
+        // h_mt_* name is still written as a deprecated ALIAS so any reader that
+        // predates 2026-07-30 keeps working. analysis/charge_asym.C and
+        // analysis/FBratio.C prefer h_yield_* and fall back to h_mt_*.
+        const TString suffix = TString::Format("%s_y%d%s", charges[ic], iy, (ib == 1 ? "_FB" : ""));
+        makeYieldHist("h_yield_" + suffix, y, e);
+        makeYieldHist("h_mt_" + suffix, y, e); // deprecated alias
       }
   csv.close();
   fy->Close(); delete fy;

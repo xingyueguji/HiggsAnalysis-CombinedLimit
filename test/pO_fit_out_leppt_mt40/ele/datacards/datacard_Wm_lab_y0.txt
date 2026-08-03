@@ -1,0 +1,39 @@
+# Auto-generated -- simultaneous W('Wm_lab_y0', lepton pT (pT>25 && mT>40 selection) discriminant) + Z(incl) fit, two-parameter model.
+imax 2
+jmax *
+kmax *
+------------
+shapes data_obs Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/data_obs
+shapes signal   Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/signal
+shapes z        Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/z
+shapes ztau     Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/ztau
+shapes wtau     Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/wtau
+shapes qcd      Wm_lab_y0 /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_W.root Wm_lab_y0/qcd
+shapes data_obs Zincl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_Z.root Z_incl/data_obs
+shapes zsig     Zincl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_Z.root Z_incl/signal
+shapes w        Zincl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_Z.root Z_incl/w
+shapes wtau     Zincl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_Z.root Z_incl/wtau
+shapes ztau     Zincl /Users/zhenghuang/HiggsAnalysis-CombinedLimit/test/pO_fit_out_leppt_mt40/ele/combine_input_Z.root Z_incl/ztau
+------------
+bin          Wm_lab_y0   Zincl
+observation  -1       -1
+------------
+bin      Wm_lab_y0   Wm_lab_y0  Wm_lab_y0  Wm_lab_y0  Wm_lab_y0   Zincl   Zincl   Zincl   Zincl
+process  signal   z       ztau    wtau    qcd      zsig    w       wtau    ztau
+process  0        1       2       3       4        5       6       7       8
+rate     -1       -1      -1      -1      -1       -1      -1      -1      -1
+------------
+# POI 'r' scales ALL W-related MC in BOTH channels: the W signal (index 0,
+# scaled automatically) + wtau here, and the w/wtau backgrounds under the Z
+# peak.
+r        rateParam Wm_lab_y0 wtau 1
+r        rateParam Zincl  w    1
+r        rateParam Zincl  wtau 1
+# Shared 'dy_norm' scales ALL DY-related MC in BOTH channels; the high-purity
+# Z peak pins it (this replaces the old shared 'eff_lumi').
+dy_norm  rateParam Wm_lab_y0 z    1 [0,10]
+dy_norm  rateParam Wm_lab_y0 ztau 1
+dy_norm  rateParam Zincl  zsig 1
+dy_norm  rateParam Zincl  ztau 1
+# Data-driven ABCD QCD: its own free normalization.
+qcd_norm rateParam Wm_lab_y0 qcd  1 [0,10]
