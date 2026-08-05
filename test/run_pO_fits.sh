@@ -67,7 +67,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
 CHAN_ARG="both"; MODE="simfit"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0; ASIMOV=0
-DISC="met"; OUT_SET=0
+DISC="leppt_mt40"; OUT_SET=0
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
 PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/user/z/zheng/pO_analysis/plotting/plots"
