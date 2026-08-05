@@ -73,7 +73,15 @@ void draw_postfit_pO(const char *fitDiagFile,
                      const char *yTitle,
                      const char *subTitle1,
                      const char *subTitle2,
-                     bool isW = true)
+                     bool isW = true,
+                     // simfit (2026-08-04): the grand fit's parameter names differ
+                     // per channel, so they are passed in.  Defaults reproduce the
+                     // legacy per-bin behavior exactly; "none" skips a slot.
+                     const char *poiName = "r",
+                     const char *dyName  = "dy_norm",
+                     const char *qcdName = "qcd_norm",
+                     int ndfParams = -1) // chi2 ndf: #params shaping THIS channel
+                                         // (-1 = all floating params of the fit)
 {
   TFile *ff = TFile::Open(fitDiagFile, "READ");
   if (!ff || ff->IsZombie()) { std::cerr << "[ERROR] cannot open " << fitDiagFile << "\n"; return; }
@@ -116,26 +124,31 @@ void draw_postfit_pO(const char *fitDiagFile,
   if (hTot) {
     int nUsed = 0;
     const double chi2 = BakerCousinsChi2(hData, hTot, nUsed); // Poisson GoF
-    const int nfloat = fr ? fr->floatParsFinal().getSize() : 0;
+    // In the grand simultaneous fit the full floating count (~73) is meaningless
+    // for a single channel's GoF -- the caller passes the ~3 params that
+    // actually shape this channel via ndfParams.
+    const int nfloat = (ndfParams >= 0) ? ndfParams
+                                        : (fr ? fr->floatParsFinal().getSize() : 0);
     int ndf = nUsed - nfloat;
     if (ndf < 1) ndf = (nUsed > 0 ? nUsed : 1);
     box.push_back(Form("#chi^{2}/ndf = %.2f, p = %.2f", chi2 / ndf, TMath::Prob(chi2, ndf)));
   }
   if (fr) {
-    RooRealVar *rv = (RooRealVar *)fr->floatParsFinal().find("r");
+    RooRealVar *rv = (RooRealVar *)fr->floatParsFinal().find(poiName);
+    TString poiLab(poiName); poiLab.ReplaceAll("_", " "); // TLatex: '_' = subscript
     const bool bad = (fr->status() != 0 || fr->covQual() < 3); // not converged / bad covariance
     if (rv)
       box.push_back(bad
-        ? Form("r = %.3f #pm %.3f  #color[2]{(status %d, covQ %d)}",
-               rv->getVal(), rv->getError(), fr->status(), fr->covQual())
-        : Form("r = %.3f #pm %.3f", rv->getVal(), rv->getError()));
+        ? Form("%s = %.3f #pm %.3f  #color[2]{(status %d, covQ %d)}",
+               poiLab.Data(), rv->getVal(), rv->getError(), fr->status(), fr->covQual())
+        : Form("%s = %.3f #pm %.3f", poiLab.Data(), rv->getVal(), rv->getError()));
     else if (bad)
       box.push_back(Form("#color[2]{fit status %d, covQ %d}", fr->status(), fr->covQual()));
     // Two-parameter model diagnostics: whichever of these float in this fit
     // (dy_norm in W + simultaneous cards, w_norm in the standalone Z card,
     // qcd_norm in W cards).  The info box auto-sizes to its line count.
     // Display labels avoid '_' (TLatex would render it as a subscript).
-    const char *pars[3]  = {"dy_norm", "w_norm", "qcd_norm"};
+    const char *pars[3]  = {dyName, "w_norm", qcdName};
     const char *plabs[3] = {"DY norm", "W norm", "QCD norm"};
     for (int ip = 0; ip < 3; ++ip) {
       RooRealVar *x = (RooRealVar *)fr->floatParsFinal().find(pars[ip]);

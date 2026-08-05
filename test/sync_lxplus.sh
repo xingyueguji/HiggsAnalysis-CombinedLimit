@@ -98,7 +98,9 @@ upload_scripts() {
   rmkdir "$FORK_LX/test/my_script"
   run "$FORK_LOCAL/test/run_pO_fits.sh" "$LX:$FORK_LX/test/" || err=1
   run "$FORK_LOCAL/test/my_script/make_pO_datacards.sh" \
+      "$FORK_LOCAL/test/my_script/make_pO_simfit_cards.sh" \
       "$FORK_LOCAL/test/my_script/extract_pO_yields.C" \
+      "$FORK_LOCAL/test/my_script/extract_pO_simfit.C" \
       "$FORK_LOCAL/test/my_script/make_yields_from_csv.C" \
       "$FORK_LOCAL/test/my_script/draw_postfit_pO.C" \
       "$FORK_LOCAL/test/my_script/plotting_helper.C" \
@@ -131,6 +133,22 @@ download_results() {
         fi
       fi
     done
+    # the grand simultaneous fit (simfit, 2026-08-04): flavourless, so outside
+    # the per-channel loop; skipped silently when not run for this disc
+    local rsimsum="$FORK_LX/test/$tree/simfit/summary"
+    if rexists "$rsimsum"; then
+      mkdir -p "$FORK_LOCAL/test/$tree/simfit/summary"
+      run "$LX:$rsimsum/" "$FORK_LOCAL/test/$tree/simfit/summary/" && got=1 || err=1
+    else
+      echo "[skip] no remote $tree/simfit/summary (simfit not run for that discriminant?)"
+    fi
+    if [ "$POSTFIT" -eq 1 ]; then
+      local rsimpost="$FORK_LX/test/$tree/simfit/postfit"
+      if rexists "$rsimpost"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/simfit/postfit"
+        run "$LX:$rsimpost/" "$FORK_LOCAL/test/$tree/simfit/postfit/" || err=1
+      fi
+    fi
   done
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"
 }
@@ -152,6 +170,9 @@ case "$CMD" in
     echo "[sync_lxplus] upload done. Next, on lxplus:"
     echo "    ssh $LX"
     echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
+    echo "    # DEFAULT = the grand simultaneous fit (simfit, mu+e in one likelihood):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh --asimov"
+    echo "    # legacy per-flavour pipeline + simfit together:"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all"
     echo "    # lepton-pT discriminant variants (2026-07-30):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --disc leppt"

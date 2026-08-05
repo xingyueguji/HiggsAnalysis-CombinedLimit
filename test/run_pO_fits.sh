@@ -26,8 +26,19 @@
 #                      <chan>_summary.csv, <chan>_fitted_yields.root}
 #
 # Usage:
-#   ./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [options]
-#     channel  (default both)   mode (default all)
+#   ./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|simfit|all] [options]
+#     channel  (default both)   mode (default simfit)
+#
+#   Mode 'simfit' (2026-08-04, the DEFAULT) = the GRAND SIMULTANEOUS FIT: all 48 (flavour,
+#   charge, y-bin) W channels + BOTH Z peaks in ONE likelihood per binning
+#   variant (lab, fb).  25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z
+#   scaling all DY-related MC; qcd_norm free per W channel; w/wtau under the Z
+#   peaks frozen at absolute MC.  Cross-flavour by construction, so the channel
+#   argument is ignored (mode 'all' runs simfit only when channel = both).
+#   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
+#   The legacy per-bin pipeline (perbin/incl/combined) is UNCHANGED and stays
+#   runnable for comparison (it refits the same Z data in every per-bin card);
+#   mode 'all' = the full legacy per-flavour pipeline PLUS simfit.
 #   options:
 #     --disc met|leppt|leppt_mt40
 #                       W discriminant (default met = PF MET shape).
@@ -42,6 +53,8 @@
 #     --no-postfit      skip the postfit plots (faster)
 #     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
 #                       use after cosmetic changes to draw_postfit_pO.C)
+#     --asimov          (simfit only) also run a prefit-Asimov closure fit per
+#                       variant (-t -1): every fitted POI must come back at 1
 #     --plots-dir DIR   analysis plots dir (else $PO_PLOTS, else autodetect)
 #     --out DIR         output root (default test/pO_fit_out)
 #
@@ -53,7 +66,7 @@ set -uo pipefail   # NOT -e: per-bin fit failures must not abort the whole loop
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-CHAN_ARG="both"; MODE="all"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0
+CHAN_ARG="both"; MODE="simfit"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0; ASIMOV=0
 DISC="met"; OUT_SET=0
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
@@ -61,15 +74,16 @@ PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/use
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    mu|ele|both)               CHAN_ARG="$1" ;;
-    perbin|incl|combined|all)  MODE="$1" ;;
+    mu|ele|both)                      CHAN_ARG="$1" ;;
+    perbin|incl|combined|simfit|all)  MODE="$1" ;;
     --dry-run)                 DRYRUN=1 ;;
     --no-postfit)              DO_POSTFIT=0 ;;
     --draw-only)               DRAWONLY=1 ;;
+    --asimov)                  ASIMOV=1 ;;
     --plots-dir)               shift; PO_PLOTS="${1:-}" ;;
     --disc)                    shift; DISC="${1:?--disc needs a value: met|leppt|leppt_mt40}" ;;
     --out)                     shift; OUTROOT="${1:?--out needs a directory}"; OUT_SET=1 ;;
-    -h|--help)                 sed -n '3,49p' "$0"; exit 0 ;;
+    -h|--help)                 sed -n '3,/bash-3.2 safe/p' "$0"; exit 0 ;;
     *) echo "[ERROR] unknown arg: $1"; exit 1 ;;
   esac
   shift
@@ -103,7 +117,7 @@ if [ "$DRAWONLY" -eq 0 ]; then
   fi
   echo "[run_pO_fits] plots dir : $PO_PLOTS"
 fi
-echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY"
+echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY    asimov: $ASIMOV"
 
 # ---- cmsenv check -----------------------------------------------------------
 HAVE_COMBINE=1
@@ -245,10 +259,150 @@ run_channel() {
   echo "          FBratio(\"$SUMM/${chan}_fitted_yields.root\")"
 }
 
+# =============================================================================
+# simfit -- the GRAND SIMULTANEOUS FIT (2026-08-04).  ONE likelihood per
+# binning variant (lab / fb): 48 W channels ({mu,ele} x {Wp,Wm} x y0..11) +
+# both Z-inclusive peaks.  25 POIs (r_<C>_y<i> shared mu/e + global r_Z),
+# free qcd_norm per W channel, w/wtau under Z frozen -- see
+# my_script/make_pO_simfit_cards.sh for the model definition (card + t2w maps).
+# Cross-flavour by construction, so it lives OUTSIDE run_channel().
+# =============================================================================
+
+fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
+  B="$1"
+  card="$SDCD/datacard_simfit_${B}.txt"; maps="$SDCD/t2w_maps_simfit_${B}.txt"
+  if [ ! -f "$card" ] || [ ! -f "$maps" ]; then echo "  [skip] no simfit card/maps for $B"; return; fi
+  RD="$SFITS/simfit_$B"; mkdir -p "$RD"
+  # the 25-POI model: one --PO map=... per line of the maps file
+  PO=(-P HiggsAnalysis.CombinedLimit.PhysicsModel:multiSignalModel --PO verbose)
+  while IFS= read -r m; do [ -n "$m" ] && PO+=(--PO "$m"); done < "$maps"
+  (
+    cd "$RD" || exit 1
+    text2workspace.py "$card" -o workspace.root "${PO[@]}" >t2w.log 2>&1 \
+      || { echo "  [FAIL t2w] simfit_$B (see $RD/t2w.log)"; exit 1; }
+    # no --rMin/--rMax: there is no POI named 'r'; ranges come from the maps.
+    # --skipBOnlyFit: a b-only fit (all 25 POIs at 0) is meaningless here.
+    combine -M FitDiagnostics workspace.root \
+            --saveShapes --saveWithUncertainties --skipBOnlyFit \
+            -n "_simfit_${B}" --cminDefaultMinimizerStrategy 0 >fit.log 2>&1 \
+      || { echo "  [FAIL fit] simfit_$B (see $RD/fit.log)"; exit 1; }
+    if [ "$ASIMOV" -eq 1 ]; then
+      # prefit Asimov (-t -1: dataset generated at the initial parameter values,
+      # all r = 1, qcd_norm = 1) -- closure: every fitted POI must return 1.
+      combine -M FitDiagnostics workspace.root \
+              --skipBOnlyFit -t -1 \
+              -n "_simfit_${B}_asimov" --cminDefaultMinimizerStrategy 0 >fit_asimov.log 2>&1 \
+        || { echo "  [FAIL asimov] simfit_$B (see $RD/fit_asimov.log)"; exit 1; }
+    fi
+  ) && echo "  [ok] simfit_$B"
+}
+
+simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both variants
+  for B in lab fb; do
+    fd="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
+    [ -f "$fd" ] || continue
+    for F in mu ele; do
+      if [ "$F" = "ele" ]; then AW="$AWEL"; AZ="$AZEL"; WL="W #rightarrow e #nu"; ZL="Z #rightarrow e e"
+      else                      AW="$AWMU"; AZ="$AZMU"; WL="W #rightarrow #mu #nu"; ZL="Z #rightarrow #mu #mu"; fi
+      for C in Wp Wm; do
+        for iy in $(seq 0 11); do
+          R="${C}_${B}_y${iy}"; CH="${F}_${R}"
+          # info box: this bin's POI, the global r_Z (shown as DY norm), this
+          # channel's qcd_norm; ndf uses the ~3 params that shape this channel.
+          root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (simfit postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"qcd_norm_${CH}\",3)" >/dev/null 2>&1
+        done
+      done
+      # the Z peak as seen by this variant's grand fit (r_Z only; W bkg frozen)
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"${F}_Z_incl\",\"$AZ\",\"Z_incl\",\"$SPOST/${F}_Z_incl_${B}\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"Z incl (simfit ${B} postfit)\",false,\"r_Z\",\"none\",\"none\",1)" >/dev/null 2>&1
+    done
+  done
+}
+
+run_simfit() {
+  echo ""
+  echo "================ simfit: grand simultaneous fit (mu + ele) ================"
+  SWORK="$OUTROOT/simfit"; SDCD="$SWORK/datacards"; SFITS="$SWORK/fits"; SPOST="$SWORK/postfit"; SSUMM="$SWORK/summary"
+  AWMU="$SWORK/combine_input_W_mu.root";  AZMU="$SWORK/combine_input_Z_mu.root"
+  AWEL="$SWORK/combine_input_W_ele.root"; AZEL="$SWORK/combine_input_Z_ele.root"
+
+  # ---- draw-only: redraw simfit postfit plots from an EXISTING run -----------
+  if [ "$DRAWONLY" -eq 1 ]; then
+    if [ ! -f "$AWMU" ] || [ ! -f "$AWEL" ]; then
+      echo "[ERROR] $SWORK input copies missing -- no previous simfit run (run the full simfit first)."
+      return
+    fi
+    nfd=$(find "$SFITS" -name 'fitDiagnostics_simfit_*.root' 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$nfd" -eq 0 ]; then
+      echo "[ERROR] no fitDiagnostics_simfit_*.root under $SFITS -- --draw-only needs an earlier"
+      echo "        simfit run (NB 'sync_lxplus.sh download' does NOT pull fits/; redraw where the fits ran)."
+      return
+    fi
+    mkdir -p "$SPOST"
+    echo "[draw-only] redrawing simfit postfit plots ..."
+    simfit_postfit_all
+    echo "[done] simfit -> $SPOST"
+    return
+  fi
+
+  WMU_SRC="$PO_PLOTS/$WINNAME";      ZMU_SRC="$PO_PLOTS/combine_input_Z.root"
+  WEL_SRC="$PO_PLOTS/Elec/$WINNAME"; ZEL_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
+  miss=0
+  for f in "$WMU_SRC" "$ZMU_SRC" "$WEL_SRC" "$ZEL_SRC"; do
+    [ -f "$f" ] || { echo "[ERROR] simfit input missing: $f"; miss=1; }
+  done
+  if [ "$miss" -eq 1 ]; then
+    echo "[ERROR] simfit needs BOTH flavours' W AND Z inputs (no Z fallback: r_Z is pinned by the peaks) -- skipped."
+    return
+  fi
+
+  mkdir -p "$SWORK" "$SDCD" "$SFITS" "$SPOST" "$SSUMM"
+  cp -f "$WMU_SRC" "$AWMU"; cp -f "$ZMU_SRC" "$AZMU"
+  cp -f "$WEL_SRC" "$AWEL"; cp -f "$ZEL_SRC" "$AZEL"
+
+  # absolute-path datacards so combine resolves shapes from any CWD
+  /bin/bash "$MYS/make_pO_simfit_cards.sh" "$AWMU" "$AZMU" "$AWEL" "$AZEL" "$SDCD" "$DISC"
+
+  if [ "$DRYRUN" -eq 1 ]; then
+    echo "[dry-run] simfit datacards + t2w maps in $SDCD ; skipping fits."
+    return
+  fi
+
+  for B in lab fb; do fit_simfit "$B"; done
+
+  # ---- extract POIs + mu+e-combined yields + covariance ----
+  if command -v root >/dev/null 2>&1; then
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\")" 2>&1 \
+      | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
+  fi
+
+  # ---- postfit plots (per channel of the grand fit: 2 variants x 50) ----
+  if [ "$DO_POSTFIT" -eq 1 ] && command -v root >/dev/null 2>&1; then
+    echo "[postfit] drawing simfit postfit plots (2 variants x 50 channels) ..."
+    simfit_postfit_all
+  fi
+
+  echo "[done] simfit -> $SWORK"
+  echo "       combined yields CSV : $SSUMM/comb_W_yields.csv"
+  echo "       POI summary         : $SSUMM/comb_summary.csv"
+  echo "       analysis input      : $SSUMM/comb_fitted_yields.root  (+ h_cov_yield[_FB])"
+  echo "       -> feed analysis macros, e.g.:"
+  echo "          charge_asym(\"$SSUMM/comb_fitted_yields.root\")"
+  echo "          FBratio(\"$SSUMM/comb_fitted_yields.root\")"
+}
+
 case "$CHAN_ARG" in
   both) CHANS="mu ele" ;;
   *)    CHANS="$CHAN_ARG" ;;
 esac
-for c in $CHANS; do run_channel "$c"; done
+if [ "$MODE" != "simfit" ]; then
+  for c in $CHANS; do run_channel "$c"; done
+fi
+if [ "$MODE" = "simfit" ]; then
+  [ "$CHAN_ARG" != "both" ] && echo "[note] simfit always uses BOTH flavours; channel arg '$CHAN_ARG' ignored."
+  run_simfit
+elif [ "$MODE" = "all" ]; then
+  if [ "$CHAN_ARG" = "both" ]; then run_simfit
+  else echo "[note] mode 'all' with channel '$CHAN_ARG': simfit needs both flavours -> skipped."; fi
+fi
 echo ""
 echo "[run_pO_fits] all done. Output under: $OUTROOT"

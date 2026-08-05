@@ -16,7 +16,16 @@ Branch: all pO code is on `zheng/po-analysis` (`main` is stock Combine —
 ```bash
 cd HiggsAnalysis-CombinedLimit/test
 cmsenv
-./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|all] [--dry-run] [--no-postfit] [--draw-only]
+./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|simfit|all] [--dry-run] [--no-postfit] [--draw-only] [--asimov]
+
+# DEFAULT (2026-08-04) = simfit, the GRAND SIMULTANEOUS FIT: one likelihood per
+# binning variant (lab, fb) with all 48 W channels ({mu,ele} x {Wp,Wm} x y0..11)
+# + BOTH Z peaks. 25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z on all
+# DY-related MC; qcd_norm free per W channel; w/wtau under Z frozen at MC.
+# --asimov adds a prefit-Asimov closure fit (all POIs must return 1; the
+# extraction prints PASS/FAIL). Outputs: pO_fit_out<suffix>/simfit/summary/
+# {comb_W_yields.csv, comb_summary.csv, comb_fitted_yields.root(+h_cov_yield[_FB])}.
+./run_pO_fits.sh --asimov
 
 # W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default met).
 # leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
@@ -32,22 +41,26 @@ cmsenv
 #     x-title; forget it and lepton-pT plots get relabeled "PF MET (GeV)").
 #     Same rule whenever --out is used.
 #   - sync_lxplus.sh download needs NO flag (sweeps all three out-trees).
-#   - charge_asym/FBratio: feed the MATCHING tree's <chan>_fitted_yields.root
-#     (pO_fit_out_leppt[_mt40]/...). The histos inside are named identically
-#     across variants (h_yield_*) -- the tree name is the only label.
+#   - observables: run the analysis repo's analysis/run_observables.sh <disc>
+#     (2026-08-03) -- it feeds the MATCHING tree automatically and writes
+#     disc-tagged files + per-disc plot folders. (By hand, remember the histos
+#     inside <chan>_fitted_yields.root are named identically across variants
+#     (h_yield_*) -- the tree name is the only label.)
 # Full workflow + physics notes: the analysis repo's README.md, Module 4.
 #   PO_PLOTS=/path/to/pO_analysis/plotting/plots   (else --plots-dir, else autodetect)
 ```
 
 | arg / option | meaning |
 |---|---|
-| `mu` / `ele` / `both` | channel(s) (default `both`) |
-| `perbin` | 48 per-(charge,y) W regions (lab + FB), each fitted **simultaneously with `Z_incl`** (two-channel card) |
-| `incl`   | `Wp_incl Wm_incl W_incl Z_incl` (standalone) |
-| `combined` | the simultaneous `WZ` (`W_incl`+`Z_incl`) fit only |
-| `all`    | perbin + incl + combined (default) |
+| `mu` / `ele` / `both` | channel(s) for the LEGACY modes (default `both`; `simfit` is always μ+e and ignores it) |
+| `simfit` | **DEFAULT.** The grand simultaneous fit (lab + fb workspaces, 25 POIs, μ/e shared) → `pO_fit_out<suffix>/simfit/` |
+| `perbin` | legacy: 48 per-(charge,y) W regions (lab + FB), each fitted **simultaneously with `Z_incl`** (two-channel card) |
+| `incl`   | legacy: `Wp_incl Wm_incl W_incl Z_incl` (standalone) |
+| `combined` | legacy: the simultaneous `WZ` (`W_incl`+`Z_incl`) fit only |
+| `all`    | the whole legacy per-flavour pipeline + simfit (when channel = `both`) |
 | `--dry-run` | build datacards only (no `cmsenv` needed) |
 | `--no-postfit` | skip postfit plots |
+| `--asimov` | (simfit) also fit the prefit Asimov dataset per variant — closure: every POI = 1 |
 | `--draw-only` | redraw postfit plots from EXISTING fits (no `combine`/`cmsenv`, only `root`) — e.g. after cosmetic changes to `draw_postfit_pO.C`. Respects channel+mode; needs the `fits/` tree from a previous run (not pulled by `sync_lxplus.sh download` — redraw where the fits ran, then `download --postfit`) |
 
 Per region: `text2workspace` → `combine -M FitDiagnostics --saveShapes
@@ -55,17 +68,47 @@ Per region: `text2workspace` → `combine -M FitDiagnostics --saveShapes
 summary}`. Per-region failures are logged and skipped (not fatal).
 
 ## Pieces (all under `test/`)
-- `run_pO_fits.sh` — master driver.
-- `my_script/make_pO_datacards.sh` — generates all 53 datacards/channel.
-- `my_script/extract_pO_yields.C` — `fit_s` → `<chan>_W_yields.csv`,
+- `run_pO_fits.sh` — master driver (simfit + legacy modes).
+- `my_script/make_pO_simfit_cards.sh` — **simfit**: writes the two 50-channel
+  grand-fit datacards (`datacard_simfit_{lab,fb}.txt`) + the multiSignalModel
+  map files (`t2w_maps_simfit_{lab,fb}.txt` — THE definition of the 25-POI
+  model). No `combineCards.py`; `--dry-run` friendly.
+- `my_script/extract_pO_simfit.C` — **simfit**: one `fit_s` per variant → all
+  POIs + the r-correlation matrix → `comb_W_yields.csv`, `comb_summary.csv`
+  (incl. covariance-propagated Wp/Wm/W sums + Asimov closure), and
+  `comb_fitted_yields.root` (`h_yield_W{p,m}_y0..11(_FB)`, yields = r×(S_mu+S_ele),
+  plus the 24×24 covariance TH2Ds `h_cov_yield[_FB]`, order [Wp_y0..11, Wm_y0..11]).
+- `my_script/make_pO_datacards.sh` — legacy: generates all 53 datacards/channel.
+- `my_script/extract_pO_yields.C` — legacy: `fit_s` → `<chan>_W_yields.csv`,
   `<chan>_summary.csv`, `<chan>_fitted_yields.root` (single-bin
   `h_mt_W{p,m}_y0..11(_FB)` with Sumw2 = fit error).
 - `my_script/make_yields_from_csv.C` — rebuild the `.root` from the CSV if the
   former came out empty (no fit re-run).
-- `my_script/draw_postfit_pO.C` — postfit data/MC, same cosmetics as `mtandmet.C`.
-- `sync_lxplus.sh` — `upload` inputs+scripts / `download` results, one SSH auth.
+- `my_script/draw_postfit_pO.C` — postfit data/MC, same cosmetics as
+  `mtandmet.C`; optional trailing args (poi/dy/qcd parameter names + ndf) let
+  the simfit pass its per-channel parameter names — defaults = legacy behavior.
+- `sync_lxplus.sh` — `upload` inputs+scripts / `download` results (legacy
+  per-chan + `simfit/` subtree), one SSH auth.
 
-## Fit model (two-parameter, 2026-07-01)
+## Fit model — simfit (2026-08-04, DEFAULT)
+- One likelihood per binning variant (lab / fb — the same events rebinned, so
+  never combined with each other): 48 W channels + `mu_Z_incl` + `ele_Z_incl`.
+- **`r_<C>_y<i>`** (24 POIs): scales `signal`+`wtau` of that (charge, y) bin in
+  BOTH flavours' channels — μ/e shared (lepton universality; the relative μ/e
+  acceptance×efficiency comes from MC — lepton SFs not applied yet).
+- **`r_Z`**: one global scale on ALL DY-related MC (`z`/`ztau` in every W
+  channel + `zsig`/`ztau` under both Z peaks). DY rapidity dependence across W
+  bins is fixed from MC; the Z peaks pin the normalization.
+- `qcd_norm_<channel>`: free per W channel (48). `w`/`wtau` under the Z peaks:
+  frozen at absolute MC (0.03–0.06 events — negligible by measurement).
+- Implemented via `multiSignalModel` maps (see `t2w_maps_simfit_*.txt`);
+  `FitDiagnostics --skipBOnlyFit` (a b-only fit with all POIs at 0 is
+  meaningless). Statistical gain vs legacy: the Z data enters ONCE (the legacy
+  per-bin cards each re-fit the same Z data, ignoring the induced
+  correlations), and the full POI covariance feeds the downstream A/R_FB
+  errors.
+
+## Legacy fit model (two-parameter, 2026-07-01)
 - **Two MC scales per fit**: the POI **`r` = all W-related MC** (W `signal` +
   `wtau`, plus the `w`/`wtau` backgrounds under the Z peak in simultaneous
   cards) and **`dy_norm` = all DY-related MC** (`z` + `ztau` + the Z signal in
