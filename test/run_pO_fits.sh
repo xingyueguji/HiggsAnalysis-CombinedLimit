@@ -287,10 +287,18 @@ fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
             -n "_simfit_${B}" --cminDefaultMinimizerStrategy 0 >fit.log 2>&1 \
       || { echo "  [FAIL fit] simfit_$B (see $RD/fit.log)"; exit 1; }
     if [ "$ASIMOV" -eq 1 ]; then
-      # prefit Asimov (-t -1: dataset generated at the initial parameter values,
-      # all r = 1, qcd_norm = 1) -- closure: every fitted POI must return 1.
+      # Prefit S+B Asimov closure: every fitted POI must return 1.
+      # NB plain `-t -1` generates the BACKGROUND-ONLY Asimov (src/Combine.cc:844
+      # falls back to mc_bonly when neither --expectSignal nor --setParameters is
+      # given, and the auto-built b-only model sets ALL POIs to 0 -- killing every
+      # POI-scaled template incl. wtau/z/ztau, so all POIs fit to ~0; seen
+      # 2026-08-05). With >1 POI combine itself says to use --setParameters, so
+      # inject ALL 25 POIs = 1 explicitly (the qcd_norm rateParams already
+      # generate at their init value 1).
+      SETPARS="r_Z=1"
+      for C in Wp Wm; do for iy in $(seq 0 11); do SETPARS="$SETPARS,r_${C}_y${iy}=1"; done; done
       combine -M FitDiagnostics workspace.root \
-              --skipBOnlyFit -t -1 \
+              --skipBOnlyFit -t -1 --setParameters "$SETPARS" \
               -n "_simfit_${B}_asimov" --cminDefaultMinimizerStrategy 0 >fit_asimov.log 2>&1 \
         || { echo "  [FAIL asimov] simfit_$B (see $RD/fit_asimov.log)"; exit 1; }
     fi
