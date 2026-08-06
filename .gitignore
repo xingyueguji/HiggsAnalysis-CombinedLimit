@@ -4,4 +4,5 @@
 build/
 install/
 site
-test/pO_fit_out/
+test/pO_fit_out*/
+.DS_Store
