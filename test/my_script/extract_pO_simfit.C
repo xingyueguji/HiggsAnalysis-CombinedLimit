@@ -2,7 +2,22 @@
 // extract_pO_simfit.C -- extraction for the GRAND SIMULTANEOUS FIT (simfit,
 // 2026-08-04): ONE FitDiagnostics result per binning variant (lab / fb) holds
 // ALL 25 POIs -- r_<C>_y<i> (24, mu/e shared) + the global DY scale r_Z --
-// plus the 48 per-channel qcd_norm rateParams.
+// plus the QCD normalization parameters and (2026-08-17) the lumi nuisance.
+//
+// QCD modes (2026-08-17): the trailing kappa arguments select how the QCD
+// normalization is read back, matching how make_pO_simfit_cards.sh built the
+// cards (run_pO_fits.sh reads them from the qcd_lnn_kappas.txt sidecar):
+//   kQcdMu/kQcdEle > 1 -> lnN mode: the fit has 4 shared nuisances
+//     qcd_rate_{mu,ele}_{Wp,Wm} (theta, N(0,1)-constrained); the CSV qcd
+//     columns then carry the MULTIPLIER kappa^theta (err = mult*ln(kappa)*dtheta),
+//     identical semantics to the legacy columns (the factor on the qcd template).
+//   kQcdMu/kQcdEle = 0 -> legacy free-rateParam mode: per-channel qcd_norm_* read.
+//   kLumi > 1 -> the global 'lumi' lnN exists; its multiplier (+err) is appended
+//     as two extra CSV columns (lumi,lumiErr; 1,0 when off) -- postfit_incl.C
+//     uses it to keep the "prefit x fitted scale" reconstruction exact.
+// Nuisance thetas (pulls) are also dumped to comb_summary.csv (<name>_theta
+// rows) -- THE check that the ABCD prediction and its assigned uncertainty are
+// consistent with the data (|pull| ~> 1 means kappa too small or template biased).
 //
 // It writes into <outDir> (both variants into the same files):
 //   (a) comb_W_yields.csv -- one row per (charge, binning, y bin): r, rErr,
@@ -53,6 +68,19 @@ Par GetPar(const RooFitResult *fr, const TString &name) {
   return p;
 }
 
+// lnN nuisance theta -> multiplicative scale kappa^theta with propagated error.
+// !ok when the nuisance is absent from fit_s (or kappa is not a valid lnN).
+Par LnNScale(const RooFitResult *fr, double kappa, const TString &name) {
+  Par p; p.ok = false; p.v = 1.0; p.e = 0.0;
+  if (kappa <= 1.0) return p;
+  Par th = GetPar(fr, name);
+  if (!th.ok) return p;
+  p.ok = true;
+  p.v = std::pow(kappa, th.v);
+  p.e = p.v * std::log(kappa) * th.e;
+  return p;
+}
+
 // nullptr when the file does not exist / has no fit_s; caller owns *f.
 RooFitResult *OpenFitS(const TString &path, TFile *&f) {
   f = nullptr;
@@ -67,7 +95,10 @@ RooFitResult *OpenFitS(const TString &path, TFile *&f) {
 void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, simfit_fb/)
                        const char *muWFile,  // muon structured combine_input_W.root
                        const char *eleWFile, // electron structured combine_input_W.root
-                       const char *outDir)   // <workdir>/summary
+                       const char *outDir,   // <workdir>/summary
+                       double kQcdMu  = 0.0, // lnN kappas the cards were built with
+                       double kQcdEle = 0.0, // (0 = free-rateParam legacy mode;
+                       double kLumi   = 0.0) //  see qcd_lnn_kappas.txt sidecar)
 {
   gSystem->mkdir(outDir, kTRUE);
 
@@ -96,7 +127,7 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
 
   std::ofstream csv(TString::Format("%s/comb_W_yields.csv", outDir).Data());
   csv << "region,charge,binning,ybin,r,rErr,signal_prefit,fitted_yield,fitted_yield_err,"
-         "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr\n";
+         "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr,lumi,lumiErr\n";
 
   std::ofstream scsv(TString::Format("%s/comb_summary.csv", outDir).Data());
   scsv << "fit,param,value,error,signal_prefit,fitted_yield,fitted_yield_err\n";
@@ -123,6 +154,38 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     if (fr->status() != 0 || fr->covQual() < 3)
       std::cout << "[extract-simfit] WARN " << fitName
                 << " quality flags (status!=0 or covQual<3) -- inspect fit.log\n";
+
+    // ---- constrained nuisances (2026-08-17 lnN model): pulls + multipliers --
+    // The pull table is the ABCD-consistency check: |theta| ~> 1 means the
+    // assigned kappa is too small or the template normalization is biased.
+    Par lum; lum.ok = false; lum.v = 1.0; lum.e = 0.0;
+    if (kLumi > 1.0) {
+      lum = LnNScale(fr, kLumi, "lumi");
+      Par lth = GetPar(fr, "lumi");
+      if (lum.ok) {
+        std::cout << "[extract-simfit] " << fitName << ": lumi pull = "
+                  << Form("%.3f +/- %.3f (scale %.4f +/- %.4f)", lth.v, lth.e, lum.v, lum.e) << "\n";
+        scsv << fitName << ",lumi_theta," << lth.v << "," << lth.e << ",,,\n";
+      } else {
+        std::cerr << "[extract-simfit] WARN 'lumi' nuisance not in fit_s (kLumi="
+                  << kLumi << " given)\n";
+      }
+    }
+    if (kQcdMu > 1.0 || kQcdEle > 1.0) {
+      for (int ifl = 0; ifl < 2; ++ifl) {
+        const char *flav = (ifl == 0) ? "mu" : "ele";
+        const double kap = (ifl == 0) ? kQcdMu : kQcdEle;
+        if (kap <= 1.0) continue;
+        for (int ic2 = 0; ic2 < 2; ++ic2) {
+          const TString nn = TString::Format("qcd_rate_%s_%s", flav, charges[ic2]);
+          Par th = GetPar(fr, nn);
+          if (!th.ok) { std::cerr << "[extract-simfit] WARN nuisance " << nn << " not in fit_s\n"; continue; }
+          std::cout << "[extract-simfit] " << fitName << ": " << nn << " pull = "
+                    << Form("%.3f +/- %.3f (scale %.4f)", th.v, th.e, std::pow(kap, th.v)) << "\n";
+          scsv << fitName << "," << nn << "_theta," << th.v << "," << th.e << ",,,\n";
+        }
+      }
+    }
 
     // ---- POIs + prefit integrals, fixed order [Wp_y0..11, Wm_y0..11] --------
     std::vector<TString> pois, regs;
@@ -157,12 +220,18 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         makeYieldHist("h_yield_" + suffix, y, e);
         makeYieldHist("h_mt_" + suffix, y, e); // deprecated alias
 
-        Par qmu = GetPar(fr, TString::Format("qcd_norm_mu_%s", regs[k].Data()));
-        Par qel = GetPar(fr, TString::Format("qcd_norm_ele_%s", regs[k].Data()));
+        // qcd factor on this channel's template: lnN mode -> kappa^theta of the
+        // shared (flavour, charge) nuisance; legacy mode -> per-channel rateParam
+        Par qmu = (kQcdMu > 1.0)
+                      ? LnNScale(fr, kQcdMu, TString::Format("qcd_rate_mu_%s", charges[ic]))
+                      : GetPar(fr, TString::Format("qcd_norm_mu_%s", regs[k].Data()));
+        Par qel = (kQcdEle > 1.0)
+                      ? LnNScale(fr, kQcdEle, TString::Format("qcd_rate_ele_%s", charges[ic]))
+                      : GetPar(fr, TString::Format("qcd_norm_ele_%s", regs[k].Data()));
         csv << regs[k] << "," << charges[ic] << "," << B << "," << iy << ","
             << rv[k] << "," << re[k] << "," << S[k] << "," << y << "," << e << ","
             << qmu.v << "," << qmu.e << "," << qel.v << "," << qel.e << ","
-            << rz.v << "," << rz.e << "\n";
+            << rz.v << "," << rz.e << "," << lum.v << "," << lum.e << "\n";
         scsv << fitName << "," << pois[k] << "," << rv[k] << "," << re[k] << ","
              << S[k] << "," << y << "," << e << "\n";
       }
@@ -230,6 +299,15 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
       if (pz.ok) {
         scsv << fitName << "_asimov,r_Z," << pz.v << "," << pz.e << ",,,\n";
         if (std::fabs(pz.v - 1.0) > worst) { worst = std::fabs(pz.v - 1.0); worstName = "r_Z"; }
+      }
+      // constrained nuisances must come back at theta = 0 on the prefit Asimov
+      const char *nuisN[5] = {"qcd_rate_mu_Wp", "qcd_rate_mu_Wm",
+                              "qcd_rate_ele_Wp", "qcd_rate_ele_Wm", "lumi"};
+      for (int in2 = 0; in2 < 5; ++in2) {
+        Par t = GetPar(fra, nuisN[in2]);
+        if (!t.ok) continue; // absent in free/legacy cards
+        scsv << fitName << "_asimov," << nuisN[in2] << "_theta," << t.v << "," << t.e << ",,,\n";
+        if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = nuisN[in2]; }
       }
       const bool pass = (worst >= 0.0 && worst < 0.01);
       std::cout << "[asimov] " << fitName << " closure: max |POI-1| = " << Form("%.4f", worst)

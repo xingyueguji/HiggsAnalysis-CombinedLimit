@@ -32,7 +32,10 @@
 #   Mode 'simfit' (2026-08-04, the DEFAULT) = the GRAND SIMULTANEOUS FIT: all 48 (flavour,
 #   charge, y-bin) W channels + BOTH Z peaks in ONE likelihood per binning
 #   variant (lab, fb).  25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z
-#   scaling all DY-related MC; qcd_norm free per W channel; w/wtau under the Z
+#   scaling all DY-related MC; QCD lnN-constrained at the ABCD prediction per
+#   (flavour, charge) + global lumi lnN on all MC (2026-08-17 default; env
+#   QCD_MODE/QCD_LNN_MU/QCD_LNN_ELE/LUMI_LNN -> make_pO_simfit_cards.sh;
+#   QCD_MODE=free restores the 48 free qcd_norm rateParams); w/wtau under the Z
 #   peaks frozen at absolute MC.  Cross-flavour by construction, so the channel
 #   argument is ignored (mode 'all' runs simfit only when channel = both).
 #   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
@@ -46,9 +49,9 @@
 #                       leppt_mt40 = lepton pT with the pT>25 && m_T>40 selection
 #                       Reads combine_input_W[_leppt[_mt40]].root and writes to
 #                       pO_fit_out[_leppt[_mt40]]/ (unless --out). Z channel and
-#                       fit model identical; qcd_norm stays free (NB the pT
-#                       variants lack the low-MET QCD anchor -> weaker qcd_norm
-#                       constraint).
+#                       fit model identical.  NB the pT variants lack the
+#                       low-MET QCD anchor, which is exactly why the QCD lnN
+#                       (vs the old free qcd_norm) matters most for them.
 #     --dry-run         build datacards + check inputs only (no cmsenv needed)
 #     --no-postfit      skip the postfit plots (faster)
 #     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
@@ -263,7 +266,8 @@ run_channel() {
 # simfit -- the GRAND SIMULTANEOUS FIT (2026-08-04).  ONE likelihood per
 # binning variant (lab / fb): 48 W channels ({mu,ele} x {Wp,Wm} x y0..11) +
 # both Z-inclusive peaks.  25 POIs (r_<C>_y<i> shared mu/e + global r_Z),
-# free qcd_norm per W channel, w/wtau under Z frozen -- see
+# QCD lnN per (flavour, charge) + global lumi lnN (2026-08-17; QCD_MODE=free
+# restores per-channel free qcd_norm), w/wtau under Z frozen -- see
 # my_script/make_pO_simfit_cards.sh for the model definition (card + t2w maps).
 # Cross-flavour by construction, so it lives OUTSIDE run_channel().
 # =============================================================================
@@ -306,6 +310,14 @@ fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
 }
 
 simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both variants
+  # QCD info-box param: lnN mode (2026-08-17 default) -> the shared per
+  # (flavour, charge) nuisance qcd_rate_<F>_<C>, whose displayed value is the
+  # PULL theta (scale = kappa^theta); free mode -> the per-channel qcd_norm.
+  QLNN=0
+  if [ -f "$SDCD/qcd_lnn_kappas.txt" ]; then
+    KQTEST=$(awk '$1=="kQcdMu"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
+    [ -n "$KQTEST" ] && [ "$KQTEST" != "0" ] && QLNN=1
+  fi
   for B in lab fb; do
     fd="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
     [ -f "$fd" ] || continue
@@ -315,9 +327,11 @@ simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both var
       for C in Wp Wm; do
         for iy in $(seq 0 11); do
           R="${C}_${B}_y${iy}"; CH="${F}_${R}"
-          # info box: this bin's POI, the global r_Z (shown as DY norm), this
-          # channel's qcd_norm; ndf uses the ~3 params that shape this channel.
-          root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (simfit postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"qcd_norm_${CH}\",3)" >/dev/null 2>&1
+          QN="qcd_norm_${CH}"; [ "$QLNN" -eq 1 ] && QN="qcd_rate_${F}_${C}"
+          # info box: this bin's POI, the global r_Z (shown as DY norm), the QCD
+          # param (lnN mode: the shared nuisance -> value shown is the PULL);
+          # ndf uses the ~3 params that shape this channel.
+          root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (simfit postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"$QN\",3)" >/dev/null 2>&1
         done
       done
       # the Z peak as seen by this variant's grand fit (r_Z only; W bkg frozen)
@@ -378,8 +392,16 @@ run_simfit() {
   for B in lab fb; do fit_simfit "$B"; done
 
   # ---- extract POIs + mu+e-combined yields + covariance ----
+  # lnN kappas the cards were built with (sidecar from make_pO_simfit_cards.sh;
+  # missing sidecar / 0 entries -> legacy free-rateParam extraction path)
+  KQM=0; KQE=0; KLU=0; KF="$SDCD/qcd_lnn_kappas.txt"
+  if [ -f "$KF" ]; then
+    KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
+    KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
+    KLU=$(awk '$1=="kLumi"{print $2}' "$KF");   KLU="${KLU:-0}"
+  fi
   if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\")" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU)" 2>&1 \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
   fi
 

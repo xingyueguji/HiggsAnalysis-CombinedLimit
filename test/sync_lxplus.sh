@@ -96,13 +96,16 @@ upload_inputs() {
 upload_scripts() {
   echo "== upload pipeline scripts -> $LX:$FORK_LX/test/ =="
   rmkdir "$FORK_LX/test/my_script"
-  run "$FORK_LOCAL/test/run_pO_fits.sh" "$LX:$FORK_LX/test/" || err=1
+  run "$FORK_LOCAL/test/run_pO_fits.sh" \
+      "$FORK_LOCAL/test/run_pO_impacts.sh" \
+      "$LX:$FORK_LX/test/" || err=1
   run "$FORK_LOCAL/test/my_script/make_pO_datacards.sh" \
       "$FORK_LOCAL/test/my_script/make_pO_simfit_cards.sh" \
       "$FORK_LOCAL/test/my_script/extract_pO_yields.C" \
       "$FORK_LOCAL/test/my_script/extract_pO_simfit.C" \
       "$FORK_LOCAL/test/my_script/make_yields_from_csv.C" \
       "$FORK_LOCAL/test/my_script/draw_postfit_pO.C" \
+      "$FORK_LOCAL/test/my_script/plot_pO_cov.C" \
       "$FORK_LOCAL/test/my_script/plotting_helper.C" \
       "$FORK_LOCAL/test/my_script/CMS_lumi.C" \
       "$FORK_LOCAL/test/my_script/CMS_lumi.h" \
@@ -149,6 +152,17 @@ download_results() {
         run "$LX:$rsimpost/" "$FORK_LOCAL/test/$tree/simfit/postfit/" || err=1
       fi
     fi
+    # impacts + covariance plots (run_pO_impacts.sh, 2026-08-17): pulled whenever
+    # present -- the json + per-POI PDFs and correlation matrices, but NOT the
+    # wd_* intermediate fit files (many higgsCombine*.root, useless locally)
+    local d
+    for d in impacts cov; do
+      local rdir="$FORK_LX/test/$tree/simfit/$d"
+      if rexists "$rdir"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/simfit/$d"
+        run --exclude 'wd_*' "$LX:$rdir/" "$FORK_LOCAL/test/$tree/simfit/$d/" || err=1
+      fi
+    done
   done
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"
 }
@@ -174,9 +188,12 @@ case "$CMD" in
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh --asimov"
     echo "    # legacy per-flavour pipeline + simfit together:"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all"
-    echo "    # lepton-pT discriminant variants (2026-07-30):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --disc leppt"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --disc leppt_mt40" ;;
+    echo "    # PRIMARY discriminant (2026-08-17): lepton pT with mT>40"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc leppt_mt40"
+    echo "    # backup: PF MET"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
+    echo "    # then impacts + covariance plots (pulled by 'download'):"
+    echo "    ./run_pO_impacts.sh --disc leppt_mt40" ;;
   download)
     echo "[sync_lxplus] download done. Next, locally (for the lepton-pT variants,"
     echo "swap pO_fit_out for pO_fit_out_leppt or pO_fit_out_leppt_mt40):"
