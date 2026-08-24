@@ -12,9 +12,23 @@
 //     columns then carry the MULTIPLIER kappa^theta (err = mult*ln(kappa)*dtheta),
 //     identical semantics to the legacy columns (the factor on the qcd template).
 //   kQcdMu/kQcdEle = 0 -> legacy free-rateParam mode: per-channel qcd_norm_* read.
+//   qcdMode = "abcd" (2026-08-23, 8th argument; from the sidecar's qcdMode
+//     line) -> the IN-FIT ABCD: the SR qcd is scaled by the FORMULA rateParam
+//     (sB*sC/sD) x the residual kappa^theta. A formula rateParam is a
+//     RooFormulaVar, ABSENT from floatParsFinal, so the multiplier is
+//     evaluated here from its floating constituents qcd_s{B,C,D}_<F>_<C>
+//     (+ theta), with the error propagated through the full correlation
+//     matrix. The CSV qcd columns keep their meaning: the factor on the qcd
+//     template written in the input file (which in abcd mode is qcd_abcd,
+//     total B0*C40/D0). kQcdMu/kQcdEle then hold the REDUCED kappas.
+//     An empty/absent qcdMode falls back to the kappa-based inference
+//     (legacy sidecars): kQcd > 1 -> lnN, = 0 -> free.
 //   kLumi > 1 -> the global 'lumi' lnN exists; its multiplier (+err) is appended
 //     as two extra CSV columns (lumi,lumiErr; 1,0 when off) -- postfit_incl.C
 //     uses it to keep the "prefit x fitted scale" reconstruction exact.
+//   The trailing qcd_model CSV column (18th, 2026-08-23) records which of the
+//     three modes produced the row, so readers (postfit_incl.C) know whether
+//     the multiplier applies to the `qcd` or the `qcd_abcd` template.
 // Nuisance thetas (pulls) are also dumped to comb_summary.csv (<name>_theta
 // rows) -- THE check that the ABCD prediction and its assigned uncertainty are
 // consistent with the data (|pull| ~> 1 means kappa too small or template biased).
@@ -81,6 +95,43 @@ Par LnNScale(const RooFitResult *fr, double kappa, const TString &name) {
   return p;
 }
 
+// abcd mode: the SR qcd multiplier M = kappa^theta * sB*sC/sD. The formula
+// rateParam itself is a RooFormulaVar (not in floatParsFinal), so M is
+// evaluated from its floating constituents with the error propagated through
+// the full correlation matrix:  dM/dp_i / M = (ln kappa, 1/sB, 1/sC, -1/sD).
+// Parameters with zero error (or absent) drop out of the propagation.
+Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char *chg) {
+  Par p; p.ok = false; p.v = 1.0; p.e = 0.0;
+  if (!fr) return p;
+  const TString nB = TString::Format("qcd_sB_%s_%s", flav, chg);
+  const TString nC = TString::Format("qcd_sC_%s_%s", flav, chg);
+  const TString nD = TString::Format("qcd_sD_%s_%s", flav, chg);
+  const Par sB = GetPar(fr, nB), sC = GetPar(fr, nC), sD = GetPar(fr, nD);
+  if (!sB.ok || !sC.ok || !sD.ok || sB.v <= 0.0 || sC.v <= 0.0 || sD.v <= 0.0)
+    return p;
+  const bool hasK = (kappa > 1.0);
+  const TString nT = TString::Format("qcd_rate_%s_%s", flav, chg);
+  Par th; th.ok = false; th.v = 0.0; th.e = 0.0;
+  if (hasK) th = GetPar(fr, nT); // absent -> theta 0 with no error contribution
+  p.ok = true;
+  p.v = (hasK && th.ok ? std::pow(kappa, th.v) : 1.0) * sB.v * sC.v / sD.v;
+  const TString nm[4] = {nT, nB, nC, nD};
+  const double  gr[4] = {(hasK && th.ok) ? std::log(kappa) : 0.0,
+                         1.0 / sB.v, 1.0 / sC.v, -1.0 / sD.v};
+  const double  er[4] = {th.e, sB.e, sC.e, sD.e};
+  double var = 0.0;
+  for (int a = 0; a < 4; ++a) {
+    if (er[a] <= 0.0) continue;
+    for (int b = 0; b < 4; ++b) {
+      if (er[b] <= 0.0) continue;
+      const double rho = (a == b) ? 1.0 : fr->correlation(nm[a].Data(), nm[b].Data());
+      var += gr[a] * gr[b] * rho * er[a] * er[b];
+    }
+  }
+  p.e = p.v * std::sqrt(var > 0.0 ? var : 0.0);
+  return p;
+}
+
 // nullptr when the file does not exist / has no fit_s; caller owns *f.
 RooFitResult *OpenFitS(const TString &path, TFile *&f) {
   f = nullptr;
@@ -98,9 +149,15 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                        const char *outDir,   // <workdir>/summary
                        double kQcdMu  = 0.0, // lnN kappas the cards were built with
                        double kQcdEle = 0.0, // (0 = free-rateParam legacy mode;
-                       double kLumi   = 0.0) //  see qcd_lnn_kappas.txt sidecar)
+                       double kLumi   = 0.0, //  see qcd_lnn_kappas.txt sidecar)
+                       const char *qcdMode = "") // "abcd"|"lnN"|"free"|"" (sidecar
+                                                 //  qcdMode line; "" = infer from kappas)
 {
   gSystem->mkdir(outDir, kTRUE);
+
+  const bool isAbcd = (TString(qcdMode) == "abcd");
+  // the qcd_model tag stamped on every CSV row (readers pick qcd vs qcd_abcd)
+  const char *qModel = isAbcd ? "abcd" : ((kQcdMu > 1.0 || kQcdEle > 1.0) ? "lnN" : "free");
 
   TFile *wmu = TFile::Open(muWFile, "READ");
   TFile *wel = TFile::Open(eleWFile, "READ");
@@ -127,7 +184,8 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
 
   std::ofstream csv(TString::Format("%s/comb_W_yields.csv", outDir).Data());
   csv << "region,charge,binning,ybin,r,rErr,signal_prefit,fitted_yield,fitted_yield_err,"
-         "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr,lumi,lumiErr\n";
+         "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr,lumi,lumiErr,"
+         "qcd_model\n";
 
   std::ofstream scsv(TString::Format("%s/comb_summary.csv", outDir).Data());
   scsv << "fit,param,value,error,signal_prefit,fitted_yield,fitted_yield_err\n";
@@ -187,6 +245,43 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
       }
     }
 
+    // ---- abcd mode: the CR scales + the assembled SR multiplier -------------
+    // sB/sC/sD are the fitted QCD yields of the three CRs relative to the
+    // prefit EWK-subtracted counts; the SR multiplier sB*sC/sD (x kappa^theta)
+    // is what the CSV qcd columns carry. Postfit QCD yield = multiplier x
+    // Sum_y Int(qcd_abcd) = multiplier x B0*C40/D0.
+    if (isAbcd) {
+      for (int ifl = 0; ifl < 2; ++ifl) {
+        const char *flav = (ifl == 0) ? "mu" : "ele";
+        const double kap = (ifl == 0) ? kQcdMu : kQcdEle;
+        for (int ic2 = 0; ic2 < 2; ++ic2) {
+          const char *scl[3] = {"B", "C", "D"};
+          double sv[3] = {0.0, 0.0, 0.0};
+          bool allok = true;
+          for (int is2 = 0; is2 < 3; ++is2) {
+            const TString nn = TString::Format("qcd_s%s_%s_%s", scl[is2], flav, charges[ic2]);
+            Par s = GetPar(fr, nn);
+            if (!s.ok) {
+              std::cerr << "[extract-simfit] WARN CR scale " << nn << " not in fit_s\n";
+              allok = false;
+              continue;
+            }
+            sv[is2] = s.v;
+            scsv << fitName << "," << nn << "," << s.v << "," << s.e << ",,,\n";
+          }
+          Par m = AbcdScale(fr, kap, flav, charges[ic2]);
+          if (allok && m.ok) {
+            std::cout << "[extract-simfit] " << fitName << ": qcd ABCD " << flav << "_"
+                      << charges[ic2] << ": sB=" << Form("%.3f", sv[0])
+                      << " sC=" << Form("%.3f", sv[1]) << " sD=" << Form("%.3f", sv[2])
+                      << " -> SR multiplier = " << Form("%.4f +/- %.4f", m.v, m.e) << "\n";
+            scsv << fitName << ",qcd_abcd_mult_" << flav << "_" << charges[ic2] << ","
+                 << m.v << "," << m.e << ",,,\n";
+          }
+        }
+      }
+    }
+
     // ---- POIs + prefit integrals, fixed order [Wp_y0..11, Wm_y0..11] --------
     std::vector<TString> pois, regs;
     std::vector<double> rv(NPOI, 0), re(NPOI, 0), S(NPOI, 0);
@@ -220,18 +315,23 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         makeYieldHist("h_yield_" + suffix, y, e);
         makeYieldHist("h_mt_" + suffix, y, e); // deprecated alias
 
-        // qcd factor on this channel's template: lnN mode -> kappa^theta of the
-        // shared (flavour, charge) nuisance; legacy mode -> per-channel rateParam
-        Par qmu = (kQcdMu > 1.0)
+        // qcd factor on this channel's template: abcd mode -> the evaluated
+        // formula (sB*sC/sD) x kappa^theta (on the qcd_abcd template); lnN mode
+        // -> kappa^theta of the shared (flavour, charge) nuisance; legacy free
+        // mode -> the per-channel rateParam
+        Par qmu = isAbcd ? AbcdScale(fr, kQcdMu, "mu", charges[ic])
+                  : (kQcdMu > 1.0)
                       ? LnNScale(fr, kQcdMu, TString::Format("qcd_rate_mu_%s", charges[ic]))
                       : GetPar(fr, TString::Format("qcd_norm_mu_%s", regs[k].Data()));
-        Par qel = (kQcdEle > 1.0)
+        Par qel = isAbcd ? AbcdScale(fr, kQcdEle, "ele", charges[ic])
+                  : (kQcdEle > 1.0)
                       ? LnNScale(fr, kQcdEle, TString::Format("qcd_rate_ele_%s", charges[ic]))
                       : GetPar(fr, TString::Format("qcd_norm_ele_%s", regs[k].Data()));
         csv << regs[k] << "," << charges[ic] << "," << B << "," << iy << ","
             << rv[k] << "," << re[k] << "," << S[k] << "," << y << "," << e << ","
             << qmu.v << "," << qmu.e << "," << qel.v << "," << qel.e << ","
-            << rz.v << "," << rz.e << "," << lum.v << "," << lum.e << "\n";
+            << rz.v << "," << rz.e << "," << lum.v << "," << lum.e << ","
+            << qModel << "\n";
         scsv << fitName << "," << pois[k] << "," << rv[k] << "," << re[k] << ","
              << S[k] << "," << y << "," << e << "\n";
       }
@@ -309,6 +409,20 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         scsv << fitName << "_asimov," << nuisN[in2] << "_theta," << t.v << "," << t.e << ",,,\n";
         if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = nuisN[in2]; }
       }
+      // abcd-mode CR scales must come back at 1 (the CR templates hold the
+      // prefit counts, so the Asimov is generated at scale 1; absent in
+      // lnN/free cards and silently skipped there)
+      const char *sclN[3] = {"B", "C", "D"};
+      for (int ifl = 0; ifl < 2; ++ifl)
+        for (int ic2 = 0; ic2 < 2; ++ic2)
+          for (int is2 = 0; is2 < 3; ++is2) {
+            const TString nn = TString::Format("qcd_s%s_%s_%s", sclN[is2],
+                                               (ifl == 0) ? "mu" : "ele", charges[ic2]);
+            Par s = GetPar(fra, nn);
+            if (!s.ok) continue;
+            scsv << fitName << "_asimov," << nn << "," << s.v << "," << s.e << ",,,\n";
+            if (std::fabs(s.v - 1.0) > worst) { worst = std::fabs(s.v - 1.0); worstName = nn; }
+          }
       const bool pass = (worst >= 0.0 && worst < 0.01);
       std::cout << "[asimov] " << fitName << " closure: max |POI-1| = " << Form("%.4f", worst)
                 << " (" << worstName << ") => " << (pass ? "PASS" : "FAIL (tolerance 0.01)") << "\n";

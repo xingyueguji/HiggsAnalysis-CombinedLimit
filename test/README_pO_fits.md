@@ -21,17 +21,27 @@ cmsenv
 # DEFAULT (2026-08-04) = simfit, the GRAND SIMULTANEOUS FIT: one likelihood per
 # binning variant (lab, fb) with all 48 W channels ({mu,ele} x {Wp,Wm} x y0..11)
 # + BOTH Z peaks. 25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z on all
-# DY-related MC; qcd_norm free per W channel; w/wtau under Z frozen at MC.
-# --asimov adds a prefit-Asimov closure fit (all POIs must return 1; the
-# extraction prints PASS/FAIL). Outputs: pO_fit_out<suffix>/simfit/summary/
+# DY-related MC; w/wtau under Z frozen at MC. QCD via QCD_MODE:
+#   lnN (default, 2026-08-17): qcd_rate_{mu,ele}_{Wp,Wm} lnN at the ABCD
+#     prediction (kappa mu 1.15 / ele 1.20; QCD_LNN_MU/QCD_LNN_ELE);
+#   free: the pre-2026-08-17 48 per-channel qcd_norm rateParams;
+#   abcd (2026-08-23, --disc leppt_mt40 ONLY): the IN-FIT ABCD -- 12 counting
+#     CR channels + free scales qcd_s{B,C,D}_<F>_<C> + the formula rateParam
+#     (sB*sC/sD) on the SR qcd_abcd template; EWK subtraction rides the POIs
+#     (CRB DY -> r_Z, CRB W -> per-y w_y* mapped to the r's; QCD_WCR=frozen
+#     freezes it); reduced residual kappas QCD_ABCD_LNN_MU=1.09/ELE=1.15.
+# --asimov adds a prefit-Asimov closure fit (all POIs must return 1 -- and in
+# abcd mode the 12 CR scales too; the extraction prints PASS/FAIL). Outputs:
+# pO_fit_out<suffix>/simfit/summary/
 # {comb_W_yields.csv, comb_summary.csv, comb_fitted_yields.root(+h_cov_yield[_FB])}.
 ./run_pO_fits.sh --asimov
+QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
 
 # W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default met).
 # leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
-# pO_fit_out_leppt[_mt40]/; the Z channel and the fit model are unchanged and
-# qcd_norm stays free (the pT variants lack the low-MET QCD anchor, so expect a
-# weaker qcd_norm constraint / larger r-qcd correlation).
+# pO_fit_out_leppt[_mt40]/; the Z channel is unchanged. For the pT variants the
+# discriminant lacks the low-MET in-fit QCD anchor, which is exactly what
+# QCD_MODE=abcd restores for leppt_mt40 (explicit CR channels).
 ./run_pO_fits.sh both all --disc leppt_mt40
 
 # *** WARNING: carry the SAME --disc through the WHOLE workflow of a variant ***
@@ -99,7 +109,11 @@ summary}`. Per-region failures are logged and skipped (not fatal).
 - **`r_Z`**: one global scale on ALL DY-related MC (`z`/`ztau` in every W
   channel + `zsig`/`ztau` under both Z peaks). DY rapidity dependence across W
   bins is fixed from MC; the Z peaks pin the normalization.
-- `qcd_norm_<channel>`: free per W channel (48). `w`/`wtau` under the Z peaks:
+- QCD (`QCD_MODE`): **lnN** (default) — `qcd_rate_{mu,ele}_{Wp,Wm}` lnN at the
+  ABCD prediction; **free** — `qcd_norm_<channel>` per W channel (48);
+  **abcd** (leppt_mt40 only) — in-fit ABCD: CR channels `<F>_<C>_CR{B,C,D}`,
+  free scales `qcd_s{B,C,D}_<F>_<C>`, formula rateParam `(@0*@1/@2)` on the SR
+  `qcd_abcd` template, reduced residual lnN. `w`/`wtau` under the Z peaks:
   frozen at absolute MC (0.03–0.06 events — negligible by measurement).
 - Implemented via `multiSignalModel` maps (see `t2w_maps_simfit_*.txt`);
   `FitDiagnostics --skipBOnlyFit` (a b-only fit with all POIs at 0 is

@@ -23,18 +23,37 @@
 #   are measured once, inclusively in y; uncorrelated across charge/flavour so
 #   the charge asymmetry gets no unearned cancellation).  QCD_MODE=free restores
 #   the pre-2026-08-17 model: 48 free qcd_norm_<channel> rateParams.
+#   QCD_MODE=abcd (2026-08-23, leppt_mt40 ONLY): the IN-FIT ABCD -- 12 extra
+#   counting CR channels <F>_<C>_{CRB,CRC,CRD} ((relIso x m_T) plane: CRB
+#   iso-pass m_T<30, CRC anti-iso m_T>40 = the SR template's source region,
+#   CRD anti-iso m_T<30; 1-bin templates written by plotting/mtandmet.C).
+#   Free scales qcd_s{B,C,D}_<F>_<C> float the three QCD counts and the SR qcd
+#   (shapes path qcd_abcd, total = B0*C40/D0) is scaled by the FORMULA
+#   rateParam (@0*@1/@2) -- Combine's documented ABCD pattern
+#   (docs/part2/settinguptheanalysis.md) -- so the normalization floats with
+#   the CR data and the EWK subtraction rides the POIs: CRB z/ztau are swept
+#   into r_Z by the catch-all map, the CRB W content is 12 per-y processes
+#   w_y0..11 mapped to r_<C>_y<i> (QCD_WCR=float, default) or one frozen wfix
+#   (QCD_WCR=frozen).  The qcd_rate_* lnN rows stay, with the REDUCED kappas
+#   (window (+) FF-shift only -- stat is profiled in-fit, plane transport does
+#   not apply; derived in correction/logs/qcd_abcd_*.log, 2026-08-23).
 #   lumi lnN (2026-08-17): one global nuisance on EVERY MC template (signal, z,
-#   ztau, wtau, zsig -- NOT the data-driven qcd), +-3% on L = 46.5 nb^-1.
+#   ztau, wtau, zsig, and the CR wfix/w_y*/ewk -- NOT the data-driven qcd),
+#   +-3% on L = 46.5 nb^-1.
 #   w, wtau under the Z peaks: FROZEN at absolute MC (0.03-0.06 events vs
 #   ~250-370 signal; decision 2026-08-04 -- no scaling parameter; the lumi lnN
 #   does ride on them, consistently with "everything MC scales with L").
 #
-# The 50-channel card is written DIRECTLY (no combineCards.py), so --dry-run
-# works without cmsenv.  Process indices are consistent across channels:
+# The 50-channel card (62 in abcd mode) is written DIRECTLY (no
+# combineCards.py), so --dry-run works without cmsenv.  Process indices are
+# consistent across channels:
 #   signal = 0 (W signal)   zsig = -1 (DY signal under the Z peaks)
 #   z = 1   ztau = 2   wtau = 3   qcd = 4   w = 5
+#   wfix = 6   ewk = 7   w_y0..w_y11 = 8..19        (abcd-mode CRs only)
 # Note lab and fb are the SAME events rebinned -> they live in SEPARATE cards
-# (separate likelihoods), never combined with each other.
+# (separate likelihoods), never combined with each other.  In abcd mode the
+# same CR channels appear in both cards, BUT the CRB w_y* shapes come from
+# w_lab_y*/w_fb_y* respectively -- the per-y split must match that card's POIs.
 #
 # The legacy per-bin pipeline (make_pO_datacards.sh) is untouched and stays
 # runnable for comparison.
@@ -68,10 +87,30 @@ mkdir -p "$OUTDIR"
 #        (9.1% e+, ~0% e- taken as accidental)           (+) anti-iso tilt 15%
 #        = 18.5%  -> 1.20
 # Override for robustness scans, e.g.  QCD_LNN_MU=1.3 QCD_LNN_ELE=1.3 ./run_pO_fits.sh ...
-QCD_MODE="${QCD_MODE:-lnN}"        # lnN | free  (free = pre-2026-08-17 model)
+QCD_MODE="${QCD_MODE:-lnN}"        # lnN | free | abcd  (free = pre-2026-08-17 model;
+                                   #  abcd = in-fit ABCD, leppt_mt40 only, 2026-08-23)
 QCD_LNN_MU="${QCD_LNN_MU:-1.15}"
 QCD_LNN_ELE="${QCD_LNN_ELE:-1.20}"
+# abcd-mode REDUCED kappas (residual on the SR qcd only: anti-iso window (+)
+# the fake-factor total shift; stat is profiled by the CR channels and the
+# plane-transport row does not apply). From correction/logs/qcd_abcd_*.log
+# (2026-08-23): mu window 9.5% (+) FF 5.5% -> 1.09 (tilt- and FF-based agree);
+# ele window 7.0% (+) FF 13.2% -> 1.15 (the FF-based value; the <pT>-tilt-based
+# one is 1.11 -- the FF shift measures the same iso-pT correlation directly, so
+# the larger is used).
+QCD_ABCD_LNN_MU="${QCD_ABCD_LNN_MU:-1.09}"
+QCD_ABCD_LNN_ELE="${QCD_ABCD_LNN_ELE:-1.15}"
+QCD_WCR="${QCD_WCR:-float}"        # abcd-mode CRB W content: float (per-y w_y*
+                                   #  mapped to the r POIs) | frozen (wfix at
+                                   #  absolute MC; add ~2%/1% residual to kappa)
 LUMI_LNN="${LUMI_LNN:-1.03}"       # +-3% on kLumi_invnb = 46.5 nb^-1 (all MC)
+
+if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
+  echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
+  echo "  (the qcd_abcd template + CR dirs exist only in combine_input_W_leppt_mt40.root;" >&2
+  echo "   the met fit's QCD is already data-constrained in-fit by its low-MET region)" >&2
+  exit 2
+fi
 
 YBINS="0 1 2 3 4 5 6 7 8 9 10 11"
 
@@ -90,6 +129,9 @@ gen_simfit_card() {  # $1 = lab | fb
   NCH=0
 
   # ---- 48 W channels ----------------------------------------------------------
+  # abcd mode fits the A0-normalized template (7th input-file object) so the
+  # formula rateParam (sB*sC/sD, init 1) needs no baked constants.
+  QPATH="qcd"; [ "$QCD_MODE" = "abcd" ] && QPATH="qcd_abcd"
   for F in mu ele; do
     if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
     for C in Wp Wm; do
@@ -101,7 +143,7 @@ shapes signal   ${CH} ${WF} ${R}/signal
 shapes z        ${CH} ${WF} ${R}/z
 shapes ztau     ${CH} ${WF} ${R}/ztau
 shapes wtau     ${CH} ${WF} ${R}/wtau
-shapes qcd      ${CH} ${WF} ${R}/qcd"
+shapes qcd      ${CH} ${WF} ${R}/${QPATH}"
         BINL="$BINL $CH"; OBSL="$OBSL -1"
         MB="$MB $CH $CH $CH $CH $CH"
         MP="$MP signal z ztau wtau qcd"
@@ -113,7 +155,14 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
           SQMWP="$SQMWP - - - - -"; SQMWM="$SQMWM - - - - -"
           SQEWP="$SQEWP - - - - -"; SQEWM="$SQEWM - - - - -"
         else
-          K="$QCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_LNN_ELE"
+          # lnN mode: the full ABCD kappa; abcd mode: the REDUCED residual
+          # (the same 4 row names, on the SR qcd columns only -- never on the
+          # CR qcd, whose yields are measurements the scales float).
+          if [ "$QCD_MODE" = "abcd" ]; then
+            K="$QCD_ABCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_ABCD_LNN_ELE"
+          else
+            K="$QCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_LNN_ELE"
+          fi
           H=" - - - - ${K}"; N=" - - - - -"
           case "${F}_${C}" in
             mu_Wp)  SQMWP="$SQMWP$H"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$N" ;;
@@ -149,6 +198,85 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau"
     NCH=$((NCH+1))
   done
 
+  # ---- 12 ABCD control-region channels (QCD_MODE=abcd only) -------------------
+  # Counting channels (1-bin templates from plotting/mtandmet.C). The free
+  # scales qcd_s{B,C,D} float the QCD counts; the SR qcd is scaled by the
+  # formula rateParam (@0*@1/@2) -- the ABCD relation inside the likelihood.
+  # ALIGNMENT RULE: every new (channel, process) column appends exactly one
+  # entry to MB/MP/MI/MR AND to all five systematics rows in the same block.
+  if [ "$QCD_MODE" = "abcd" ]; then
+    for F in mu ele; do
+      if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
+      for C in Wp Wm; do
+        # --- CRB: iso-pass, m_T<30 (EWK ~10-20%: z/ztau ride r_Z; W floats or freezes) ---
+        CH="${F}_${C}_CRB"
+        SHAPES="${SHAPES}
+shapes data_obs ${CH} ${WF} ${C}_CRB/data_obs
+shapes qcd      ${CH} ${WF} ${C}_CRB/qcd
+shapes z        ${CH} ${WF} ${C}_CRB/z
+shapes ztau     ${CH} ${WF} ${C}_CRB/ztau"
+        BINL="$BINL $CH"; OBSL="$OBSL -1"
+        if [ "$QCD_WCR" = "frozen" ]; then
+          SHAPES="${SHAPES}
+shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
+          MB="$MB $CH $CH $CH $CH"
+          MP="$MP qcd z ztau wfix"
+          MI="$MI 4 1 2 6"
+          MR="$MR -1 -1 -1 -1"
+          SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
+          SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
+          SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
+        else
+          MB="$MB $CH $CH $CH"
+          MP="$MP qcd z ztau"
+          MI="$MI 4 1 2"
+          MR="$MR -1 -1 -1"
+          SQMWP="$SQMWP - - -"; SQMWM="$SQMWM - - -"
+          SQEWP="$SQEWP - - -"; SQEWM="$SQEWM - - -"
+          SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN}"
+          # per-y W content: card process w_y<i> <- histogram w_<B>_y<i>
+          # (lab and fb cards MUST wire their own split -- see the header note)
+          PIDX=8
+          for iy in $YBINS; do
+            SHAPES="${SHAPES}
+shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
+            MB="$MB $CH"; MP="$MP w_y${iy}"; MI="$MI $PIDX"; MR="$MR -1"
+            SQMWP="$SQMWP -"; SQMWM="$SQMWM -"; SQEWP="$SQEWP -"; SQEWM="$SQEWM -"
+            SLUMI="$SLUMI ${LUMI_LNN}"
+            PIDX=$((PIDX+1))
+          done
+        fi
+        NCH=$((NCH+1))
+        # --- CRC (anti-iso, m_T>40) and CRD (anti-iso, m_T<30): one frozen ewk ---
+        for RG in CRC CRD; do
+          CH="${F}_${C}_${RG}"
+          SHAPES="${SHAPES}
+shapes data_obs ${CH} ${WF} ${C}_${RG}/data_obs
+shapes qcd      ${CH} ${WF} ${C}_${RG}/qcd
+shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
+          BINL="$BINL $CH"; OBSL="$OBSL -1"
+          MB="$MB $CH $CH"
+          MP="$MP qcd ewk"
+          MI="$MI 4 7"
+          MR="$MR -1 -1"
+          SQMWP="$SQMWP - -"; SQMWM="$SQMWM - -"
+          SQEWP="$SQEWP - -"; SQEWM="$SQEWM - -"
+          SLUMI="$SLUMI - ${LUMI_LNN}"
+          NCH=$((NCH+1))
+        done
+        # --- the three free scales + the functional SR multiplier -------------
+        # The formula's ONLY args are the scales (init 1 each), and the SR
+        # template total is B0*C40/D0 exactly, so prefit == the ABCD prediction
+        # and Asimov closure demands all three scales = 1.
+        RP="${RP}
+qcd_sB_${F}_${C} rateParam ${F}_${C}_CRB qcd 1 [0,10]
+qcd_sC_${F}_${C} rateParam ${F}_${C}_CRC qcd 1 [0,10]
+qcd_sD_${F}_${C} rateParam ${F}_${C}_CRD qcd 1 [0,10]
+qcd_abcd_${F}_${C} rateParam ${F}_${C}_${B}_y* qcd (@0*@1/@2) qcd_sB_${F}_${C},qcd_sC_${F}_${C},qcd_sD_${F}_${C}"
+      done
+    done
+  fi
+
   # ---- systematics block: lumi always; the 4 QCD lnN rows only in lnN mode ----
   SYST="
 ${SLUMI}"
@@ -161,6 +289,8 @@ ${SQEWM}"
   fi
   if [ "$QCD_MODE" = "free" ]; then
     QDESC="qcd_norm free rateParam per W channel"
+  elif [ "$QCD_MODE" = "abcd" ]; then
+    QDESC="QCD in-fit ABCD: 12 CR channels + (sB*sC/sD) formula rateParam on the SR qcd_abcd; residual lnN mu ${QCD_ABCD_LNN_MU} / ele ${QCD_ABCD_LNN_ELE}; CRB W-part ${QCD_WCR}"
   else
     QDESC="QCD lnN (ABCD) per flavour x charge: mu ${QCD_LNN_MU}, ele ${QCD_LNN_ELE}"
   fi
@@ -197,6 +327,16 @@ EOF
       echo "map=(mu|ele)_${C}_${B}_y${iy}/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
     done
   done
+  if [ "$QCD_MODE" = "abcd" ] && [ "$QCD_WCR" != "frozen" ]; then
+    # CRB W content floats with the SAME POIs (the in-fit EWK subtraction).
+    # The process name ENDS in the y index, so the \$ anchor alone keeps
+    # w_y1 from matching w_y10 (no trailing-/ trick needed here).
+    for C in Wp Wm; do
+      for iy in $YBINS; do
+        echo "map=(mu|ele)_${C}_CRB/w_y${iy}\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      done
+    done
+  fi
   echo "map=.*/(z|ztau|zsig)\$:r_Z[1,0,10]" >> "$MAPS"
 
   echo "[make_pO_simfit_cards] wrote $(basename "$CARD") (${NCH} channels) + $(basename "$MAPS") ($(wc -l < "$MAPS" | tr -d ' ') maps)"
@@ -209,12 +349,17 @@ gen_simfit_card fb
 # run_pO_fits.sh at extraction time (single source even if env changes between
 # card generation and extraction).  kQcd* = 0 means "free rateParam mode":
 # extract_pO_simfit.C then reads the per-channel qcd_norm params (legacy path).
+# qcdMode (2026-08-23) makes the mode explicit; sidecars WITHOUT the line are
+# legacy (mode inferred: kQcd > 0 -> lnN, = 0 -> free). In abcd mode the kQcd*
+# entries hold the REDUCED kappas.
 KQM="$QCD_LNN_MU"; KQE="$QCD_LNN_ELE"
 if [ "$QCD_MODE" = "free" ]; then KQM=0; KQE=0; fi
+if [ "$QCD_MODE" = "abcd" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
 cat > "$OUTDIR/qcd_lnn_kappas.txt" <<EOF
 kQcdMu $KQM
 kQcdEle $KQE
 kLumi $LUMI_LNN
+qcdMode $QCD_MODE
 EOF
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (W discriminant: ${DISCLABEL})"

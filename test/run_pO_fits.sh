@@ -35,7 +35,13 @@
 #   scaling all DY-related MC; QCD lnN-constrained at the ABCD prediction per
 #   (flavour, charge) + global lumi lnN on all MC (2026-08-17 default; env
 #   QCD_MODE/QCD_LNN_MU/QCD_LNN_ELE/LUMI_LNN -> make_pO_simfit_cards.sh;
-#   QCD_MODE=free restores the 48 free qcd_norm rateParams); w/wtau under the Z
+#   QCD_MODE=free restores the 48 free qcd_norm rateParams; QCD_MODE=abcd
+#   (2026-08-23, --disc leppt_mt40 ONLY) = the IN-FIT ABCD: 12 counting CR
+#   channels + free scales qcd_s{B,C,D}_<F>_<C> + the formula rateParam
+#   (sB*sC/sD) on the SR qcd_abcd template, so the QCD normalization floats
+#   with the CR data and the EWK subtraction rides the POIs; env
+#   QCD_ABCD_LNN_MU/QCD_ABCD_LNN_ELE = the reduced residual kappas,
+#   QCD_WCR=float|frozen picks the CRB W treatment); w/wtau under the Z
 #   peaks frozen at absolute MC.  Cross-flavour by construction, so the channel
 #   argument is ignored (mode 'all' runs simfit only when channel = both).
 #   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
@@ -381,8 +387,14 @@ run_simfit() {
   cp -f "$WMU_SRC" "$AWMU"; cp -f "$ZMU_SRC" "$AZMU"
   cp -f "$WEL_SRC" "$AWEL"; cp -f "$ZEL_SRC" "$AZEL"
 
-  # absolute-path datacards so combine resolves shapes from any CWD
-  /bin/bash "$MYS/make_pO_simfit_cards.sh" "$AWMU" "$AZMU" "$AWEL" "$AZEL" "$SDCD" "$DISC"
+  # absolute-path datacards so combine resolves shapes from any CWD.
+  # The generator can refuse (e.g. QCD_MODE=abcd with a non-leppt_mt40 disc);
+  # the script runs without -e, so check explicitly or the fit stage would run
+  # on stale/absent cards.
+  if ! /bin/bash "$MYS/make_pO_simfit_cards.sh" "$AWMU" "$AZMU" "$AWEL" "$AZEL" "$SDCD" "$DISC"; then
+    echo "[ERROR] simfit datacard generation failed -- simfit skipped."
+    return
+  fi
 
   if [ "$DRYRUN" -eq 1 ]; then
     echo "[dry-run] simfit datacards + t2w maps in $SDCD ; skipping fits."
@@ -392,16 +404,19 @@ run_simfit() {
   for B in lab fb; do fit_simfit "$B"; done
 
   # ---- extract POIs + mu+e-combined yields + covariance ----
-  # lnN kappas the cards were built with (sidecar from make_pO_simfit_cards.sh;
-  # missing sidecar / 0 entries -> legacy free-rateParam extraction path)
-  KQM=0; KQE=0; KLU=0; KF="$SDCD/qcd_lnn_kappas.txt"
+  # lnN kappas + qcd mode the cards were built with (sidecar from
+  # make_pO_simfit_cards.sh; missing sidecar / 0 entries -> legacy
+  # free-rateParam extraction path; missing qcdMode line -> legacy sidecar,
+  # mode inferred from the kappas inside the extractor)
+  KQM=0; KQE=0; KLU=0; QMODE=""; KF="$SDCD/qcd_lnn_kappas.txt"
   if [ -f "$KF" ]; then
     KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
     KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
     KLU=$(awk '$1=="kLumi"{print $2}' "$KF");   KLU="${KLU:-0}"
+    QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
   fi
   if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU)" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\")" 2>&1 \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
   fi
 
