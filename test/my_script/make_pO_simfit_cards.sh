@@ -43,6 +43,24 @@
 #   w, wtau under the Z peaks: FROZEN at absolute MC (0.03-0.06 events vs
 #   ~250-370 signal; decision 2026-08-04 -- no scaling parameter; the lumi lnN
 #   does ride on them, consistently with "everything MC scales with L").
+#   LHE SHAPE systematics (2026-09-07): the Combine inputs carry, for every MC
+#   process of every SR region, <process>_<syst>Up/Down built from the
+#   generator's per-event LHE weights (plotting/mtandmet.C + dileptonpeak.C
+#   from the skim twins; skim/lhe_updown.py):
+#     nPDF      EPPS21nlo_CT18Anlo_O16, LHAPDF PDFSet.uncertainty() per bin
+#     qcdScale  muR/muF envelope (per-bin max/min over the 9-point grid)
+#     alphaS    the alpha_s 0.119 / 0.117 member templates
+#   The sidecar next to each input (<input minus .root>_systs.txt) lists what
+#   was written; this script uses the systematics common to ALL FOUR inputs
+#   and emits ONE `shape` row each (entries 1 on the MC columns the sidecar
+#   lists, - on the data-driven qcd and on every CR column) plus the fifth
+#   `shapes` token <dir>/<proc>_$SYSTEMATIC on the MC processes. One row name =
+#   one nuisance for the whole card -> fully correlated across channels,
+#   flavours, charges and processes (the correlation that cancels in the
+#   charge asymmetry). A `lhe` group is declared for --freezeNuisanceGroups.
+#     LHE_SYST=auto  (default) the sidecars' common list
+#     LHE_SYST=off   no shape rows (cards byte-identical to the pre-09-07 ones)
+#     LHE_SYST=a,b   an explicit subset (each must be in all four sidecars)
 #
 # The 50-channel card (62 in abcd mode) is written DIRECTLY (no
 # combineCards.py), so --dry-run works without cmsenv.  Process indices are
@@ -104,6 +122,7 @@ QCD_WCR="${QCD_WCR:-float}"        # abcd-mode CRB W content: float (per-y w_y*
                                    #  mapped to the r POIs) | frozen (wfix at
                                    #  absolute MC; add ~2%/1% residual to kappa)
 LUMI_LNN="${LUMI_LNN:-1.03}"       # +-3% on kLumi_invnb = 46.5 nb^-1 (all MC)
+LHE_SYST="${LHE_SYST:-auto}"       # auto | off | comma list (see header)
 
 if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
@@ -111,6 +130,75 @@ if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   echo "   the met fit's QCD is already data-constrained in-fit by its low-MET region)" >&2
   exit 2
 fi
+
+# ---- LHE shape systematics: the systematics common to all four sidecars -----
+# Sidecar format (plotting/mtandmet.C, dileptonpeak.C): '# comment' lines and
+# '<syst> <hist-process> ...' lines, e.g. 'nPDF signal z ztau wtau' (W inputs)
+# or 'nPDF signal ztau w wtau' (Z inputs; hist 'signal' = card process 'zsig').
+sidecar_systs() {  # $1 = input .root -> the syst names listed next to it
+  local sc="${1%.root}_systs.txt"
+  [ -f "$sc" ] || return 0
+  awk '!/^#/ && NF>0 {print $1}' "$sc"
+}
+sidecar_procs() {  # $1 = input .root, $2 = syst -> its histogram-process list
+  local sc="${1%.root}_systs.txt"
+  [ -f "$sc" ] || return 0
+  awk -v s="$2" '!/^#/ && $1==s {for (i=2;i<=NF;i++) printf "%s ", $i; print ""}' "$sc"
+}
+LHENAMES=""   # space-separated systematics in use ("" = none)
+if [ "$LHE_SYST" != "off" ]; then
+  for s in $(sidecar_systs "$WMU"); do
+    ok=1
+    for f in "$WEL" "$ZMU" "$ZEL"; do
+      case " $(sidecar_systs "$f" | tr '\n' ' ') " in *" $s "*) ;; *) ok=0 ;; esac
+    done
+    if [ "$ok" -eq 1 ]; then
+      case ",$LHE_SYST," in *,auto,*|*",$s,"*) LHENAMES="$LHENAMES $s" ;; esac
+    else
+      echo "[make_pO_simfit_cards] WARN LHE syst '$s' is not in every input's sidecar -> dropped" >&2
+    fi
+  done
+  LHENAMES="${LHENAMES# }"
+  if [ "$LHE_SYST" != "auto" ]; then
+    for s in $(echo "$LHE_SYST" | tr ',' ' '); do
+      case " $LHENAMES " in *" $s "*) ;; *)
+        echo "[make_pO_simfit_cards] ERROR LHE_SYST='$s' is not available in all four sidecars" >&2; exit 2 ;;
+      esac
+    done
+  fi
+fi
+NLHE=$(echo "$LHENAMES" | wc -w | tr -d ' ')
+# per-syst process lists (histogram names) of the W and Z inputs, indexed like LHENAMES
+LHEPW=(); LHEPZ=()
+i=0
+for s in $LHENAMES; do
+  LHEPW[$i]="$(sidecar_procs "$WMU" "$s")"
+  LHEPZ[$i]="$(sidecar_procs "$ZMU" "$s")"
+  i=$((i+1))
+done
+# fifth `shapes` token (Combine appends Up/Down to $SYSTEMATIC); empty when no systs
+SY=""; [ "$NLHE" -gt 0 ] && SY='_$SYSTEMATIC'
+
+# Append one entry per LHE shape row for a block of process columns:
+#   $1 = W | Z | CR (which sidecar list applies; CR = never), $2.. = the
+#   HISTOGRAM names of the columns in MP order (zsig -> signal).
+# ALIGNMENT RULE: call it in every block that appends to MB/MP/MI/MR, with
+# exactly as many names as columns.
+lhe_append() {
+  local kind="$1"; shift
+  local i=0 s p e plist
+  for s in $LHENAMES; do
+    e=""
+    plist=""
+    [ "$kind" = "W" ] && plist="${LHEPW[$i]}"
+    [ "$kind" = "Z" ] && plist="${LHEPZ[$i]}"
+    for p in "$@"; do
+      case " $plist " in *" $p "*) e="$e 1" ;; *) e="$e -" ;; esac
+    done
+    SLHE[$i]="${SLHE[$i]}$e"
+    i=$((i+1))
+  done
+}
 
 YBINS="0 1 2 3 4 5 6 7 8 9 10 11"
 
@@ -126,6 +214,9 @@ gen_simfit_card() {  # $1 = lab | fb
   SQMWP="qcd_rate_mu_Wp   lnN"; SQMWM="qcd_rate_mu_Wm   lnN"
   SQEWP="qcd_rate_ele_Wp  lnN"; SQEWM="qcd_rate_ele_Wm  lnN"
   SLUMI="lumi             lnN"
+  # LHE shape rows, one per systematic (entries appended by lhe_append)
+  SLHE=()
+  i=0; for s in $LHENAMES; do SLHE[$i]="$(printf '%-17s%s' "$s" 'shape')"; i=$((i+1)); done
   NCH=0
 
   # ---- 48 W channels ----------------------------------------------------------
@@ -139,16 +230,17 @@ gen_simfit_card() {  # $1 = lab | fb
         R="${C}_${B}_y${iy}"; CH="${F}_${R}"
         SHAPES="${SHAPES}
 shapes data_obs ${CH} ${WF} ${R}/data_obs
-shapes signal   ${CH} ${WF} ${R}/signal
-shapes z        ${CH} ${WF} ${R}/z
-shapes ztau     ${CH} ${WF} ${R}/ztau
-shapes wtau     ${CH} ${WF} ${R}/wtau
+shapes signal   ${CH} ${WF} ${R}/signal${SY:+ ${R}/signal$SY}
+shapes z        ${CH} ${WF} ${R}/z${SY:+ ${R}/z$SY}
+shapes ztau     ${CH} ${WF} ${R}/ztau${SY:+ ${R}/ztau$SY}
+shapes wtau     ${CH} ${WF} ${R}/wtau${SY:+ ${R}/wtau$SY}
 shapes qcd      ${CH} ${WF} ${R}/${QPATH}"
         BINL="$BINL $CH"; OBSL="$OBSL -1"
         MB="$MB $CH $CH $CH $CH $CH"
         MP="$MP signal z ztau wtau qcd"
         MI="$MI 0 1 2 3 4"
         MR="$MR -1 -1 -1 -1 -1"
+        lhe_append W signal z ztau wtau qcd
         if [ "$QCD_MODE" = "free" ]; then
           RP="${RP}
 qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
@@ -183,10 +275,10 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
     CH="${F}_Z_incl"
     SHAPES="${SHAPES}
 shapes data_obs ${CH} ${ZF} Z_incl/data_obs
-shapes zsig     ${CH} ${ZF} Z_incl/signal
-shapes w        ${CH} ${ZF} Z_incl/w
-shapes wtau     ${CH} ${ZF} Z_incl/wtau
-shapes ztau     ${CH} ${ZF} Z_incl/ztau"
+shapes zsig     ${CH} ${ZF} Z_incl/signal${SY:+ Z_incl/signal$SY}
+shapes w        ${CH} ${ZF} Z_incl/w${SY:+ Z_incl/w$SY}
+shapes wtau     ${CH} ${ZF} Z_incl/wtau${SY:+ Z_incl/wtau$SY}
+shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
     BINL="$BINL $CH"; OBSL="$OBSL -1"
     MB="$MB $CH $CH $CH $CH"
     MP="$MP zsig w wtau ztau"
@@ -195,6 +287,7 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau"
     SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
     SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
     SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
+    lhe_append Z signal w wtau ztau
     NCH=$((NCH+1))
   done
 
@@ -203,7 +296,8 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau"
   # scales qcd_s{B,C,D} float the QCD counts; the SR qcd is scaled by the
   # formula rateParam (@0*@1/@2) -- the ABCD relation inside the likelihood.
   # ALIGNMENT RULE: every new (channel, process) column appends exactly one
-  # entry to MB/MP/MI/MR AND to all five systematics rows in the same block.
+  # entry to MB/MP/MI/MR AND to all five systematics rows in the same block
+  # AND (via lhe_append CR ..., always '-') to every LHE shape row.
   if [ "$QCD_MODE" = "abcd" ]; then
     for F in mu ele; do
       if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
@@ -226,6 +320,7 @@ shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
           SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
           SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
           SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
+          lhe_append CR qcd z ztau wfix
         else
           MB="$MB $CH $CH $CH"
           MP="$MP qcd z ztau"
@@ -234,6 +329,7 @@ shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
           SQMWP="$SQMWP - - -"; SQMWM="$SQMWM - - -"
           SQEWP="$SQEWP - - -"; SQEWM="$SQEWM - - -"
           SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN}"
+          lhe_append CR qcd z ztau
           # per-y W content: card process w_y<i> <- histogram w_<B>_y<i>
           # (lab and fb cards MUST wire their own split -- see the header note)
           PIDX=8
@@ -243,6 +339,7 @@ shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
             MB="$MB $CH"; MP="$MP w_y${iy}"; MI="$MI $PIDX"; MR="$MR -1"
             SQMWP="$SQMWP -"; SQMWM="$SQMWM -"; SQEWP="$SQEWP -"; SQEWM="$SQEWM -"
             SLUMI="$SLUMI ${LUMI_LNN}"
+            lhe_append CR w_y${iy}
             PIDX=$((PIDX+1))
           done
         fi
@@ -262,6 +359,7 @@ shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
           SQMWP="$SQMWP - -"; SQMWM="$SQMWM - -"
           SQEWP="$SQEWP - -"; SQEWM="$SQEWM - -"
           SLUMI="$SLUMI - ${LUMI_LNN}"
+          lhe_append CR qcd ewk
           NCH=$((NCH+1))
         done
         # --- the three free scales + the functional SR multiplier -------------
@@ -287,6 +385,19 @@ ${SQMWM}
 ${SQEWP}
 ${SQEWM}"
   fi
+  # LHE shape rows (2026-09-07) + the `lhe` group for --freezeNuisanceGroups
+  i=0
+  for s in $LHENAMES; do
+    SYST="${SYST}
+${SLHE[$i]}"
+    i=$((i+1))
+  done
+  LHEDESC="no LHE shape systematics (LHE_SYST=${LHE_SYST})"
+  if [ "$NLHE" -gt 0 ]; then
+    SYST="${SYST}
+lhe group = ${LHENAMES}"
+    LHEDESC="LHE shape systematics (group lhe): ${LHENAMES} on the MC processes (<proc>_<syst>Up/Down from the input files' sidecars)"
+  fi
   if [ "$QCD_MODE" = "free" ]; then
     QDESC="qcd_norm free rateParam per W channel"
   elif [ "$QCD_MODE" = "abcd" ]; then
@@ -303,6 +414,7 @@ ${SQEWM}"
 # multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
 # ${QDESC}; lumi lnN ${LUMI_LNN} on all MC (not qcd);
 # w/wtau under the Z peaks FROZEN at absolute MC (negligible: <0.1 evt).
+# ${LHEDESC}
 imax ${NCH}
 jmax *
 kmax *
@@ -355,12 +467,18 @@ gen_simfit_card fb
 KQM="$QCD_LNN_MU"; KQE="$QCD_LNN_ELE"
 if [ "$QCD_MODE" = "free" ]; then KQM=0; KQE=0; fi
 if [ "$QCD_MODE" = "abcd" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
+# lheSysts (2026-09-07): the LHE shape nuisances in the cards, comma-joined
+# ("none" when off/absent) -- the extractor reports their pulls and includes
+# them in the Asimov closure; postfit_incl.C switches to shapes_fit_s on it.
+LHELIST=$(echo "$LHENAMES" | tr ' ' ','); LHELIST="${LHELIST:-none}"
 cat > "$OUTDIR/qcd_lnn_kappas.txt" <<EOF
 kQcdMu $KQM
 kQcdEle $KQE
 kLumi $LUMI_LNN
 qcdMode $QCD_MODE
+lheSysts $LHELIST
 EOF
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (W discriminant: ${DISCLABEL})"
 echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (mu ${KQM} / ele ${KQE}); lumi lnN ${LUMI_LNN}"
+echo "[make_pO_simfit_cards] LHE shape systematics: ${LHELIST} (LHE_SYST=${LHE_SYST})"

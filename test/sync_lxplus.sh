@@ -10,9 +10,9 @@
 #                                     # (4 required MET/Z + up to 4 optional
 #                                     #  lepton-pT variant W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
-#   ./sync_lxplus.sh download         # pull summary/ (fitted yields + CSVs), both chans,
-#                                     # from ALL discriminant out-trees present
-#                                     # (pO_fit_out, pO_fit_out_leppt, pO_fit_out_leppt_mt40)
+#   ./sync_lxplus.sh download         # pull summary/ (fitted yields + CSVs) AND
+#                                     # datacards/ (cards+maps+sidecar as ACTUALLY fitted),
+#                                     # all out-trees present (pO_fit_out[_leppt[_mt40]])
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
 # Options (any command):
 #   --chan mu|ele   restrict to one channel (default: both)
@@ -89,6 +89,13 @@ upload_inputs() {
     if [ -f "$ANA_LOCAL/plotting/$f" ]; then SEND="$SEND $f"
     else echo "[note] optional variant not built (skipped): $f"; fi
   done
+  # the LHE shape-systematics sidecars (2026-09-07, <input>_systs.txt): the card
+  # generator reads them next to the inputs, so they must travel together
+  local sc
+  for f in $SEND; do
+    sc="${f%.root}_systs.txt"
+    [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
+  done
   rmkdir "$ANA_LX/plotting"
   ( cd "$ANA_LOCAL/plotting" && run --relative $SEND "$LX:$ANA_LX/plotting/" ) || err=1
 }
@@ -126,6 +133,14 @@ download_results() {
       else
         echo "[skip] no remote $tree/$c/summary (fit not run for that channel/discriminant?)"
       fi
+      # the datacards actually fitted (local dry-runs regenerate the local
+      # copies with local env defaults, so they can silently disagree with the
+      # downloaded summary); silent skip when absent
+      local rdc="$FORK_LX/test/$tree/$c/datacards"
+      if rexists "$rdc"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/$c/datacards"
+        run "$LX:$rdc/" "$FORK_LOCAL/test/$tree/$c/datacards/" || err=1
+      fi
       if [ "$POSTFIT" -eq 1 ]; then
         local rpost="$FORK_LX/test/$tree/$c/postfit"
         if rexists "$rpost"; then
@@ -152,15 +167,32 @@ download_results() {
         run "$LX:$rsimpost/" "$FORK_LOCAL/test/$tree/simfit/postfit/" || err=1
       fi
     fi
-    # impacts + covariance plots (run_pO_impacts.sh, 2026-08-17): pulled whenever
-    # present -- the json + per-POI PDFs and correlation matrices, but NOT the
-    # wd_* intermediate fit files (many higgsCombine*.root, useless locally)
+    # datacards (2026-08-24): the cards + t2w maps + qcd_lnn_kappas.txt sidecar
+    # ACTUALLY FITTED on lxplus. Local --dry-run regenerates the local copies
+    # with local env defaults (e.g. QCD_MODE=lnN instead of abcd), so without
+    # this pull the local cards/sidecar silently disagree with the downloaded
+    # summary. Plus impacts + covariance plots (run_pO_impacts.sh, 2026-08-17):
+    # pulled whenever present -- the json + per-POI PDFs and correlation
+    # matrices, but NOT the wd_* intermediate fit files (many
+    # higgsCombine*.root, useless locally)
     local d
-    for d in impacts cov; do
+    for d in datacards impacts cov; do
       local rdir="$FORK_LX/test/$tree/simfit/$d"
       if rexists "$rdir"; then
         mkdir -p "$FORK_LOCAL/test/$tree/simfit/$d"
         run --exclude 'wd_*' "$LX:$rdir/" "$FORK_LOCAL/test/$tree/simfit/$d/" || err=1
+      fi
+    done
+    # the FitDiagnostics results themselves (2026-09-07): with LHE shape
+    # nuisances in the fit the postfit shapes are no longer prefit x scale, so
+    # plotting/postfit_incl.C reads shapes_fit_s from these files. Only the two
+    # fitDiagnostics_simfit_<B>.root (not the workspaces/logs/higgsCombine*).
+    local B rfd
+    for B in lab fb; do
+      rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_$B.root"
+      if rexists "$rfd"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B"
+        run "$LX:$rfd" "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B/" || err=1
       fi
     done
   done

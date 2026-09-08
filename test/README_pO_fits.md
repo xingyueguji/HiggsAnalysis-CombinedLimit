@@ -31,11 +31,18 @@ cmsenv
 #     (CRB DY -> r_Z, CRB W -> per-y w_y* mapped to the r's; QCD_WCR=frozen
 #     freezes it); reduced residual kappas QCD_ABCD_LNN_MU=1.09/ELE=1.15.
 # --asimov adds a prefit-Asimov closure fit (all POIs must return 1 -- and in
-# abcd mode the 12 CR scales too; the extraction prints PASS/FAIL). Outputs:
-# pO_fit_out<suffix>/simfit/summary/
+# abcd mode the 12 CR scales too, and every shape nuisance at 0; the extraction
+# prints PASS/FAIL). Outputs: pO_fit_out<suffix>/simfit/summary/
 # {comb_W_yields.csv, comb_summary.csv, comb_fitted_yields.root(+h_cov_yield[_FB])}.
+# LHE shape systematics (2026-09-07): the inputs carry <proc>_{nPDF,qcdScale,
+# alphaS}Up/Down (+ a <input>_systs.txt sidecar listing them); the cards get one
+# `shape` row each on the MC columns + the `lhe` group. LHE_SYST=auto (default,
+# the sidecars' common list) | off (cards as before) | nPDF,alphaS (subset).
+# Pulls/constraints -> comb_summary.csv <name>_theta rows; stat-only comparison:
+# combine ... --freezeNuisanceGroups lhe
 ./run_pO_fits.sh --asimov
 QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
+LHE_SYST=off ./run_pO_fits.sh both simfit --disc leppt_mt40             # no theory shape nuisances
 
 # W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default met).
 # leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
@@ -115,6 +122,15 @@ summary}`. Per-region failures are logged and skipped (not fatal).
   free scales `qcd_s{B,C,D}_<F>_<C>`, formula rateParam `(@0*@1/@2)` on the SR
   `qcd_abcd` template, reduced residual lnN. `w`/`wtau` under the Z peaks:
   frozen at absolute MC (0.03–0.06 events — negligible by measurement).
+- LHE shape systematics (2026-09-07, `LHE_SYST`): `nPDF` (EPPS21 via LHAPDF's
+  `PDFSet.uncertainty()`), `qcdScale` (μR/μF envelope), `alphaS` (0.119/0.117
+  members) — one `shape` row each, flag `1` on `signal/z/ztau/wtau` (W) and
+  `zsig/w/wtau/ztau` (Z), `-` on the data-driven `qcd` and all CR columns;
+  templates `<dir>/<proc>_$SYSTEMATIC` (Up/Down) from the analysis repo's
+  `combine_input_*.root`, listed in the `<input>_systs.txt` sidecar the
+  generator reads. One name = one θ for the whole card (fully correlated). Group
+  `lhe` for `--freezeNuisanceGroups`. Sidecar line `lheSysts` → the extractor
+  reports pulls + constraints and includes them in the Asimov closure.
 - Implemented via `multiSignalModel` maps (see `t2w_maps_simfit_*.txt`);
   `FitDiagnostics --skipBOnlyFit` (a b-only fit with all POIs at 0 is
   meaningless). Statistical gain vs legacy: the Z data enters ONCE (the legacy

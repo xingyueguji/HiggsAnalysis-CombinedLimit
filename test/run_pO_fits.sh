@@ -42,7 +42,11 @@
 #   with the CR data and the EWK subtraction rides the POIs; env
 #   QCD_ABCD_LNN_MU/QCD_ABCD_LNN_ELE = the reduced residual kappas,
 #   QCD_WCR=float|frozen picks the CRB W treatment); w/wtau under the Z
-#   peaks frozen at absolute MC.  Cross-flavour by construction, so the channel
+#   peaks frozen at absolute MC.  LHE shape systematics (2026-09-07):
+#   nPDF / qcdScale / alphaS `shape` rows from the <proc>_<syst>Up/Down
+#   templates the inputs carry (env LHE_SYST=auto|off|list -> the card
+#   generator; the inputs' *_systs.txt sidecars travel with the copies).
+#   Cross-flavour by construction, so the channel
 #   argument is ignored (mode 'all' runs simfit only when channel = both).
 #   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
 #   The legacy per-bin pipeline (perbin/incl/combined) is UNCHANGED and stays
@@ -384,6 +388,14 @@ run_simfit() {
   fi
 
   mkdir -p "$SWORK" "$SDCD" "$SFITS" "$SPOST" "$SSUMM"
+  # LHE shape-systematics sidecars (2026-09-07, <input minus .root>_systs.txt):
+  # travel with the inputs so the card generator finds them next to the copies
+  # (absent -> no shape rows; a stale copy is removed so it cannot lie).
+  for pair in "$WMU_SRC|$AWMU" "$ZMU_SRC|$AZMU" "$WEL_SRC|$AWEL" "$ZEL_SRC|$AZEL"; do
+    psrc="${pair%%|*}"; pdst="${pair##*|}"
+    if [ -f "${psrc%.root}_systs.txt" ]; then cp -f "${psrc%.root}_systs.txt" "${pdst%.root}_systs.txt"
+    else rm -f "${pdst%.root}_systs.txt"; fi
+  done
   cp -f "$WMU_SRC" "$AWMU"; cp -f "$ZMU_SRC" "$AZMU"
   cp -f "$WEL_SRC" "$AWEL"; cp -f "$ZEL_SRC" "$AZEL"
 
@@ -408,15 +420,19 @@ run_simfit() {
   # make_pO_simfit_cards.sh; missing sidecar / 0 entries -> legacy
   # free-rateParam extraction path; missing qcdMode line -> legacy sidecar,
   # mode inferred from the kappas inside the extractor)
-  KQM=0; KQE=0; KLU=0; QMODE=""; KF="$SDCD/qcd_lnn_kappas.txt"
+  # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
+  # -> none); the extractor reports their pulls + closure.
+  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; KF="$SDCD/qcd_lnn_kappas.txt"
   if [ -f "$KF" ]; then
     KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
     KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
     KLU=$(awk '$1=="kLumi"{print $2}' "$KF");   KLU="${KLU:-0}"
     QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
+    LHES=$(awk '$1=="lheSysts"{print $2}' "$KF"); LHES="${LHES:-}"
+    [ "$LHES" = "none" ] && LHES=""
   fi
   if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\")" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\")" 2>&1 \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
   fi
 

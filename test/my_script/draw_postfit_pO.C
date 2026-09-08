@@ -177,6 +177,14 @@ void draw_postfit_pO(const char *fitDiagFile,
   // also tightens the entries.
   ps.legX1 = 0.72; ps.legY1 = 0.275;
   ps.legX2 = 0.93; ps.legY2 = 0.455;
+  // Lepton-pT discriminants: start the axis at the 25 GeV selection floor
+  // (bin edge 24 on the 2 GeV template grid) -- no empty [0,25) band. Gated
+  // on the x-title the driver passes per disc; MET/mass axes are untouched.
+  if (TString(xTitle).Contains("p_{T}"))
+  {
+    ps.xRangeLo = 24.0;
+    ps.xRangeHi = 100.0;
+  }
   PlotTuner tuner = [&](TCanvas *c, TH1 *h) {
     (void)c; if (!h) return;
     if (ps.logy) h->SetMinimum(1.0);

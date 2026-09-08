@@ -29,9 +29,16 @@
 //   The trailing qcd_model CSV column (18th, 2026-08-23) records which of the
 //     three modes produced the row, so readers (postfit_incl.C) know whether
 //     the multiplier applies to the `qcd` or the `qcd_abcd` template.
+//   lheSysts (2026-09-07, 9th argument; the sidecar's lheSysts line, comma
+//     list, ""/"none" = none): the LHE shape nuisances (nPDF, qcdScale,
+//     alphaS) -- their pulls AND post-fit constraints go to comb_summary.csv
+//     (<name>_theta rows: value = pull, error = constraint; error < 1 means the
+//     data constrained that shape) and they join the Asimov closure (theta = 0).
 // Nuisance thetas (pulls) are also dumped to comb_summary.csv (<name>_theta
 // rows) -- THE check that the ABCD prediction and its assigned uncertainty are
 // consistent with the data (|pull| ~> 1 means kappa too small or template biased).
+// A final sweep prints any floating parameter of fit_s not reported above, so
+// a new nuisance can never be silently invisible.
 //
 // It writes into <outDir> (both variants into the same files):
 //   (a) comb_W_yields.csv -- one row per (charge, binning, y bin): r, rErr,
@@ -65,6 +72,8 @@
 #include "RooFitResult.h"
 #include "RooRealVar.h"
 #include "RooArgList.h"
+#include "TObjArray.h"
+#include "TObjString.h"
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -150,12 +159,27 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                        double kQcdMu  = 0.0, // lnN kappas the cards were built with
                        double kQcdEle = 0.0, // (0 = free-rateParam legacy mode;
                        double kLumi   = 0.0, //  see qcd_lnn_kappas.txt sidecar)
-                       const char *qcdMode = "") // "abcd"|"lnN"|"free"|"" (sidecar
+                       const char *qcdMode = "", // "abcd"|"lnN"|"free"|"" (sidecar
                                                  //  qcdMode line; "" = infer from kappas)
+                       const char *lheSysts = "") // comma list of the LHE shape
+                                                  //  nuisances in the cards ("" = none)
 {
   gSystem->mkdir(outDir, kTRUE);
 
   const bool isAbcd = (TString(qcdMode) == "abcd");
+  std::vector<TString> lheNames; // the LHE shape nuisances (sidecar lheSysts line)
+  {
+    TString s(lheSysts);
+    if (s != "" && s != "none") {
+      TObjArray *toks = s.Tokenize(",");
+      for (int i = 0; i < toks->GetEntries(); ++i) {
+        TString t = ((TObjString *)toks->At(i))->GetString();
+        t.ReplaceAll(" ", "");
+        if (t != "") lheNames.push_back(t);
+      }
+      delete toks;
+    }
+  }
   // the qcd_model tag stamped on every CSV row (readers pick qcd vs qcd_abcd)
   const char *qModel = isAbcd ? "abcd" : ((kQcdMu > 1.0 || kQcdEle > 1.0) ? "lnN" : "free");
 
@@ -279,6 +303,39 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                  << m.v << "," << m.e << ",,,\n";
           }
         }
+      }
+    }
+
+    // ---- LHE shape nuisances (2026-09-07): pull + constraint ---------------
+    // theta ~ N(0,1) a priori: value = pull (data preferred a shifted template),
+    // error = post-fit constraint (< 1 only if the data measure that shape --
+    // for a theory nuisance that is worth knowing, it means the data are
+    // tuning e.g. muR/muF).
+    for (size_t il = 0; il < lheNames.size(); ++il) {
+      Par th = GetPar(fr, lheNames[il]);
+      if (!th.ok) {
+        std::cerr << "[extract-simfit] WARN LHE nuisance " << lheNames[il] << " not in fit_s\n";
+        continue;
+      }
+      std::cout << "[extract-simfit] " << fitName << ": " << lheNames[il] << " pull = "
+                << Form("%.3f +/- %.3f", th.v, th.e)
+                << (th.e < 0.9 ? "  (constrained by the data)" : "") << "\n";
+      scsv << fitName << "," << lheNames[il] << "_theta," << th.v << "," << th.e << ",,,\n";
+    }
+
+    // ---- safety net: every floating parameter not reported above -----------
+    {
+      const RooArgList &fp = fr->floatParsFinal();
+      for (int i = 0; i < fp.getSize(); ++i) {
+        const RooRealVar *x = (const RooRealVar *)fp.at(i);
+        const TString n = x->GetName();
+        bool known = n.BeginsWith("r_") || n == "lumi" || n.BeginsWith("qcd_rate_") ||
+                     n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm_");
+        for (size_t il = 0; il < lheNames.size() && !known; ++il) known = (n == lheNames[il]);
+        if (!known)
+          std::cout << "[extract-simfit] WARN " << fitName << ": floating parameter " << n << " = "
+                    << Form("%.4f +/- %.4f", x->getVal(), x->getError())
+                    << " is not reported in the CSVs (add it to the sidecar / this extractor)\n";
       }
     }
 
@@ -408,6 +465,14 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         if (!t.ok) continue; // absent in free/legacy cards
         scsv << fitName << "_asimov," << nuisN[in2] << "_theta," << t.v << "," << t.e << ",,,\n";
         if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = nuisN[in2]; }
+      }
+      // LHE shape nuisances (2026-09-07): the prefit Asimov is generated at
+      // theta = 0, so every shape nuisance must come back at 0 too
+      for (size_t il = 0; il < lheNames.size(); ++il) {
+        Par t = GetPar(fra, lheNames[il]);
+        if (!t.ok) continue;
+        scsv << fitName << "_asimov," << lheNames[il] << "_theta," << t.v << "," << t.e << ",,,\n";
+        if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = lheNames[il]; }
       }
       // abcd-mode CR scales must come back at 1 (the CR templates hold the
       // prefit counts, so the Asimov is generated at scale 1; absent in

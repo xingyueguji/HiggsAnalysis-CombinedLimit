@@ -70,8 +70,21 @@ struct PlotStyle
     std::string drawOptGraph = "AP";
     bool logy = false;
 
+    // Top-pad y-axis headroom in SaveDataMCRatio: maximum = yHeadroom *
+    // max(data, MC). <= 0 keeps the legacy 1.4. On log-y pads use a
+    // multiplicative decade-scale value (e.g. 20) -- 1.4 is invisible there.
+    double yHeadroom = -1.0;
+
     // stat box
     bool showStats = false;
+
+    // Opt-in x-axis zoom, applied when xRangeHi > xRangeLo (e.g. start lepton-pT
+    // axes at the 25 GeV selection floor instead of showing the empty [0,25)
+    // band). Snaps to the enclosing bin edges. SaveNicePlot1D_WithBkg RESTORES
+    // the full range on the input histogram after saving (the caller may write
+    // that histogram to a file, and persisted zoom bits would silently restrict
+    // later no-argument Integral() calls); SaveDataMCRatio works on clones.
+    double xRangeLo = 0.0, xRangeHi = -1.0;
 
     // background/MC normalization in SaveNicePlot1D_WithBkg:
     //   true  -> scale the MC stack to the data integral (shape comparison)
@@ -698,6 +711,9 @@ static void SaveNicePlot1D_WithBkg(
     // 4️⃣ Draw data on top
     //--------------------------------------------------
     ApplyHistStyle(h, ps, xTitle, yTitle);
+    const bool xZoom = (ps.xRangeHi > ps.xRangeLo);
+    if (xZoom)
+        h->GetXaxis()->SetRangeUser(ps.xRangeLo, ps.xRangeHi); // restored below
     if (ps.pullPad)
     {
         // x axis moves to the pull pad
@@ -780,6 +796,10 @@ static void SaveNicePlot1D_WithBkg(
         hPull->SetDirectory(nullptr);
         hPull->Reset();
 
+        // auto y-range from the VISIBLE bins only (an xRange zoom would
+        // otherwise let off-screen pulls inflate the scale)
+        const int vis1 = hPull->GetXaxis()->GetFirst();
+        const int vis2 = hPull->GetXaxis()->GetLast();
         double maxAbs = 0.0;
         if (mcTot)
         {
@@ -799,7 +819,8 @@ static void SaveNicePlot1D_WithBkg(
                 const double pull = (d - m) / std::sqrt(s2);
                 hPull->SetBinContent(i, pull);
                 hPull->SetBinError(i, 0.0);
-                maxAbs = std::max(maxAbs, std::fabs(pull));
+                if (i >= vis1 && i <= vis2)
+                    maxAbs = std::max(maxAbs, std::fabs(pull));
             }
         }
 
@@ -835,8 +856,9 @@ static void SaveNicePlot1D_WithBkg(
 
         hPull->Draw("B"); // bars anchored at zero (handles negative pulls)
 
-        const double x1 = hPull->GetXaxis()->GetXmin();
-        const double x2 = hPull->GetXaxis()->GetXmax();
+        // visible-range edges (== full axis when no ps.xRange zoom is set)
+        const double x1 = hPull->GetXaxis()->GetBinLowEdge(hPull->GetXaxis()->GetFirst());
+        const double x2 = hPull->GetXaxis()->GetBinUpEdge(hPull->GetXaxis()->GetLast());
         TLine *l0 = new TLine(x1, 0.0, x2, 0.0);
         l0->SetLineStyle(2);
         l0->SetLineColor(kRed + 1);
@@ -859,6 +881,12 @@ static void SaveNicePlot1D_WithBkg(
 
     c->SaveAs((outPathNoExt + ".png").c_str());
     c->SaveAs((outPathNoExt + ".pdf").c_str());
+
+    // Restore the full axis range on the caller's histogram: h is often
+    // file-owned and written out later (e.g. the Combine input templates), and
+    // persisted zoom bits would restrict later no-arg Integral() calls.
+    if (xZoom)
+        h->GetXaxis()->SetRange(0, 0);
 
     delete c;
 }
@@ -1015,6 +1043,11 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
     // ---------------- top pad: overlay ----------------
     pTop->cd();
     ApplyHistStyle(hm, ps, "", yTitle); // MC defines the frame
+    if (ps.xRangeHi > ps.xRangeLo)      // opt-in zoom (hd/hm/hr are clones)
+    {
+        hm->GetXaxis()->SetRangeUser(ps.xRangeLo, ps.xRangeHi);
+        hd->GetXaxis()->SetRangeUser(ps.xRangeLo, ps.xRangeHi);
+    }
     hm->GetXaxis()->SetLabelSize(0.0);  // hide x labels on the top pad
     hm->GetXaxis()->SetTitleSize(0.0);
 
@@ -1029,7 +1062,7 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
     hd->SetMarkerColor(kBlack);
 
     const double ymax = std::max(hd->GetMaximum(), hm->GetMaximum());
-    hm->SetMaximum(1.4 * ymax);
+    hm->SetMaximum((ps.yHeadroom > 0 ? ps.yHeadroom : 1.4) * ymax);
     if (!ps.logy)
         hm->SetMinimum(0.0);
 
@@ -1079,8 +1112,8 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
     hr->SetMaximum(1.5);
     hr->Draw("E1");
 
-    TLine *l1 = new TLine(hr->GetXaxis()->GetXmin(), 1.0,
-                          hr->GetXaxis()->GetXmax(), 1.0);
+    TLine *l1 = new TLine(hr->GetXaxis()->GetBinLowEdge(hr->GetXaxis()->GetFirst()), 1.0,
+                          hr->GetXaxis()->GetBinUpEdge(hr->GetXaxis()->GetLast()), 1.0);
     l1->SetLineStyle(2);
     l1->SetLineColor(kRed + 1);
     l1->Draw("SAME");
