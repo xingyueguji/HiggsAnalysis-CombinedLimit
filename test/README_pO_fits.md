@@ -40,9 +40,19 @@ cmsenv
 # the sidecars' common list) | off (cards as before) | nPDF,alphaS (subset).
 # Pulls/constraints -> comb_summary.csv <name>_theta rows; stat-only comparison:
 # combine ... --freezeNuisanceGroups lhe
+# Lepton-SF shape systematics (2026-09-14, muon first): the muon inputs list
+# ONE combined nuisance muSF (skim/muon_sf.h: ID, ISO and inclusive trigger SF
+# shifts added in quadrature per bin) -> a row with entries on the muon columns
+# only (the generator uses the UNION of the four sidecars with per-input
+# process lists), group `lepsf`. If the analysis repo ships the three sources
+# separately (muID/muIso/muTrig) instead, SF_TRIG_CORR=auto (default) follows
+# the sidecar's '#! muTrig corr' directive (coherent for an inclusive trigger
+# SF; perbin -> muTrig split into muTrig_y0..11 with `nuisance edit rename`).
+# Stat-only: --freezeNuisanceGroups lhe,lepsf
 ./run_pO_fits.sh --asimov
 QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
 LHE_SYST=off ./run_pO_fits.sh both simfit --disc leppt_mt40             # no theory shape nuisances
+SF_TRIG_CORR=perbin QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40   # robustness: muTrig decorrelated per y bin
 
 # W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default met).
 # leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
@@ -112,7 +122,8 @@ summary}`. Per-region failures are logged and skipped (not fatal).
   never combined with each other): 48 W channels + `mu_Z_incl` + `ele_Z_incl`.
 - **`r_<C>_y<i>`** (24 POIs): scales `signal`+`wtau` of that (charge, y) bin in
   BOTH flavours' channels — μ/e shared (lepton universality; the relative μ/e
-  acceptance×efficiency comes from MC — lepton SFs not applied yet).
+  acceptance×efficiency comes from MC — muon SFs applied in the analysis
+  repo's skim since 2026-09-14, electron SFs not yet).
 - **`r_Z`**: one global scale on ALL DY-related MC (`z`/`ztau` in every W
   channel + `zsig`/`ztau` under both Z peaks). DY rapidity dependence across W
   bins is fixed from MC; the Z peaks pin the normalization.
@@ -131,6 +142,18 @@ summary}`. Per-region failures are logged and skipped (not fatal).
   generator reads. One name = one θ for the whole card (fully correlated). Group
   `lhe` for `--freezeNuisanceGroups`. Sidecar line `lheSysts` → the extractor
   reports pulls + constraints and includes them in the Asimov closure.
+- Lepton-SF shape systematics (2026-09-14, muon first): ONE combined nuisance
+  `muSF` from the analysis repo's `skim/muon_sf.h` (pp POG ID/ISO SFs and the
+  MB-derived inclusive trigger SF, their ±1σ shifts added in quadrature per
+  bin), listed by the muon sidecars only → `1` on the muon W/Z MC columns,
+  `-` on every electron column (the generator uses the union of the four
+  sidecars with per-input process lists); group `lepsf`; same `shape`
+  treatment as the theory nuisances. Should the analysis repo ship the three
+  sources separately (`muID`, `muIso`, `muTrig`), the muTrig correlation model
+  follows the sidecar directive `#! muTrig corr` (`SF_TRIG_CORR=auto`):
+  `coherent` for an inclusive trigger SF, `perbin` → split into 12 nuisances
+  `muTrig_y<i>` with `nuisance edit rename` (same histograms). Sidecar
+  `lheSysts` lists all nuisance names, `sfTrigCorr` the resolved choice.
 - Implemented via `multiSignalModel` maps (see `t2w_maps_simfit_*.txt`);
   `FitDiagnostics --skipBOnlyFit` (a b-only fit with all POIs at 0 is
   meaningless). Statistical gain vs legacy: the Z data enters ONCE (the legacy

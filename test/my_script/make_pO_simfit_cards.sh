@@ -51,16 +51,37 @@
 #     qcdScale  muR/muF envelope (per-bin max/min over the 9-point grid)
 #     alphaS    the alpha_s 0.119 / 0.117 member templates
 #   The sidecar next to each input (<input minus .root>_systs.txt) lists what
-#   was written; this script uses the systematics common to ALL FOUR inputs
-#   and emits ONE `shape` row each (entries 1 on the MC columns the sidecar
-#   lists, - on the data-driven qcd and on every CR column) plus the fifth
-#   `shapes` token <dir>/<proc>_$SYSTEMATIC on the MC processes. One row name =
-#   one nuisance for the whole card -> fully correlated across channels,
-#   flavours, charges and processes (the correlation that cancels in the
-#   charge asymmetry). A `lhe` group is declared for --freezeNuisanceGroups.
-#     LHE_SYST=auto  (default) the sidecars' common list
+#   was written; this script uses the UNION of the four sidecars and emits ONE
+#   `shape` row each (entries 1 on the MC columns of the inputs whose sidecar
+#   lists it, - on the data-driven qcd, on every CR column and on the columns
+#   of inputs that do not list it) plus the fifth `shapes` token
+#   <dir>/<proc>_$SYSTEMATIC on the MC processes. One row name = one nuisance
+#   for the whole card -> fully correlated across channels, flavours, charges
+#   and processes (the correlation that cancels in the charge asymmetry). A
+#   `lhe` group holds the theory ones for --freezeNuisanceGroups.
+#   LEPTON-SF SHAPE systematics (2026-09-14, muon first): the muon inputs carry
+#   <process>_muSFUp/Down (skim/muon_sf.h) = ONE combined muon-SF nuisance --
+#   the pp-2025 POG ID and ISO SFs and our MB-derived inclusive trigger SF,
+#   each varied +-1 sigma, added in quadrature bin by bin (three independent
+#   sources -> the exact 1 sigma of the product; user decision: one Up and one
+#   Down for the fit). Listed by the muon sidecars only -> `1` on the muon
+#   channels' MC columns, `-` on every electron column; group `lepsf`. The
+#   analysis repo can alternatively list the three sources separately
+#   (muID/muIso/muTrig); everything below then applies per source, and the
+#   muTrig correlation model follows the trigger-SF binning chosen
+#   in the analysis repo (skim/muon_sf.h; recorded in the muon sidecars as the
+#   directive '#! muTrig corr <coherent|perbin>', read when SF_TRIG_CORR=auto,
+#   the default): the SF is INCLUSIVE in rapidity since 2026-09-14 (the per-y
+#   values are consistent with a flat SF, chi2/ndf 11.5/11) -> ONE coherent
+#   nuisance. With a per-y SF (pure-statistics per-bin errors) the directive
+#   says perbin and the single template variation is split into 12 independent
+#   nuisances muTrig_y<i> with `nuisance edit rename` (one per rapidity bin,
+#   both charges; Combine maps each new name back to the SAME
+#   <proc>_muTrigUp/Down histograms, no duplicated templates; the Z-peak piece
+#   stays under muTrig). SF_TRIG_CORR=perbin|coherent overrides the directive.
+#     LHE_SYST=auto  (default) the sidecars' union
 #     LHE_SYST=off   no shape rows (cards byte-identical to the pre-09-07 ones)
-#     LHE_SYST=a,b   an explicit subset (each must be in all four sidecars)
+#     LHE_SYST=a,b   an explicit subset (each must be listed by some sidecar)
 #
 # The 50-channel card (62 in abcd mode) is written DIRECTLY (no
 # combineCards.py), so --dry-run works without cmsenv.  Process indices are
@@ -123,6 +144,8 @@ QCD_WCR="${QCD_WCR:-float}"        # abcd-mode CRB W content: float (per-y w_y*
                                    #  absolute MC; add ~2%/1% residual to kappa)
 LUMI_LNN="${LUMI_LNN:-1.03}"       # +-3% on kLumi_invnb = 46.5 nb^-1 (all MC)
 LHE_SYST="${LHE_SYST:-auto}"       # auto | off | comma list (see header)
+SF_TRIG_CORR="${SF_TRIG_CORR:-auto}"    # auto (the muon W sidecar's '#! muTrig corr' directive, coherent if
+                                        #  absent) | perbin | coherent -- see header
 
 if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
@@ -131,10 +154,16 @@ if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   exit 2
 fi
 
-# ---- LHE shape systematics: the systematics common to all four sidecars -----
+# ---- shape systematics: the UNION of the four sidecars, per-INPUT process lists ----
 # Sidecar format (plotting/mtandmet.C, dileptonpeak.C): '# comment' lines and
 # '<syst> <hist-process> ...' lines, e.g. 'nPDF signal z ztau wtau' (W inputs)
 # or 'nPDF signal ztau w wtau' (Z inputs; hist 'signal' = card process 'zsig').
+# Since 2026-09-14 a systematic may be listed by ONE flavour's inputs only (the
+# muon SFs muID / muIso / muTrig live in the muon W and Z sidecars): its row
+# gets `1` on the columns of the inputs that list it and `-` everywhere else,
+# so a card never references a shape that is missing -- the per-input lists
+# below are the single source of that. The theory (LHE) systematics are still
+# expected in all four inputs (a WARN flags anything else).
 sidecar_systs() {  # $1 = input .root -> the syst names listed next to it
   local sc="${1%.root}_systs.txt"
   [ -f "$sc" ] || return 0
@@ -145,53 +174,84 @@ sidecar_procs() {  # $1 = input .root, $2 = syst -> its histogram-process list
   [ -f "$sc" ] || return 0
   awk -v s="$2" '!/^#/ && $1==s {for (i=2;i<=NF;i++) printf "%s ", $i; print ""}' "$sc"
 }
-LHENAMES=""   # space-separated systematics in use ("" = none)
+LHE_THEORY="nPDF qcdScale alphaS"   # the LHE (theory) families; every other listed name is a lepton-SF one
+LHENAMES=""   # space-separated shape systematics in use ("" = none), sidecar order
 if [ "$LHE_SYST" != "off" ]; then
-  for s in $(sidecar_systs "$WMU"); do
-    ok=1
-    for f in "$WEL" "$ZMU" "$ZEL"; do
-      case " $(sidecar_systs "$f" | tr '\n' ' ') " in *" $s "*) ;; *) ok=0 ;; esac
+  ALLS=$( { sidecar_systs "$WMU"; sidecar_systs "$WEL"; sidecar_systs "$ZMU"; sidecar_systs "$ZEL"; } | awk 'NF && !seen[$0]++' )
+  for s in $ALLS; do
+    case ",$LHE_SYST," in *,auto,*|*",$s,"*) ;; *) continue ;; esac
+    LHENAMES="$LHENAMES $s"
+    have=""
+    for f in "$WMU" "$WEL" "$ZMU" "$ZEL"; do
+      case " $(sidecar_systs "$f" | tr '\n' ' ') " in *" $s "*) have="${have}1" ;; *) have="${have}0" ;; esac
     done
-    if [ "$ok" -eq 1 ]; then
-      case ",$LHE_SYST," in *,auto,*|*",$s,"*) LHENAMES="$LHENAMES $s" ;; esac
-    else
-      echo "[make_pO_simfit_cards] WARN LHE syst '$s' is not in every input's sidecar -> dropped" >&2
-    fi
+    case " $LHE_THEORY " in
+      *" $s "*) [ "$have" = "1111" ] || echo "[make_pO_simfit_cards] WARN theory syst '$s' listed by inputs (muW eleW muZ eleZ) = $have only -> entries only where listed (inputs out of step?)" >&2 ;;
+      *) echo "[make_pO_simfit_cards] lepton-SF syst '$s' listed by inputs (muW eleW muZ eleZ) = $have -> entries on those columns only" ;;
+    esac
   done
   LHENAMES="${LHENAMES# }"
   if [ "$LHE_SYST" != "auto" ]; then
     for s in $(echo "$LHE_SYST" | tr ',' ' '); do
       case " $LHENAMES " in *" $s "*) ;; *)
-        echo "[make_pO_simfit_cards] ERROR LHE_SYST='$s' is not available in all four sidecars" >&2; exit 2 ;;
+        echo "[make_pO_simfit_cards] ERROR LHE_SYST='$s' is not listed in any input's sidecar" >&2; exit 2 ;;
       esac
     done
   fi
 fi
 NLHE=$(echo "$LHENAMES" | wc -w | tr -d ' ')
-# per-syst process lists (histogram names) of the W and Z inputs, indexed like LHENAMES
-LHEPW=(); LHEPZ=()
+# per-syst process lists (histogram names) of EACH input, indexed like LHENAMES
+LHEP_W_MU=(); LHEP_W_ELE=(); LHEP_Z_MU=(); LHEP_Z_ELE=()
 i=0
 for s in $LHENAMES; do
-  LHEPW[$i]="$(sidecar_procs "$WMU" "$s")"
-  LHEPZ[$i]="$(sidecar_procs "$ZMU" "$s")"
+  LHEP_W_MU[$i]="$(sidecar_procs "$WMU" "$s")"
+  LHEP_W_ELE[$i]="$(sidecar_procs "$WEL" "$s")"
+  LHEP_Z_MU[$i]="$(sidecar_procs "$ZMU" "$s")"
+  LHEP_Z_ELE[$i]="$(sidecar_procs "$ZEL" "$s")"
   i=$((i+1))
 done
+# muTrig correlation model (2026-09-14): decided in the analysis repo together
+# with the trigger-SF binning (skim/muon_sf.h kTrigBinning -> kMuTrigCorr) and
+# recorded in the muon sidecars as '#! muTrig corr <coherent|perbin>' (a '#!'
+# line is a directive, not a systematic -- sidecar_systs() skips '#' lines).
+# auto follows it (coherent when absent = the inclusive SF); an explicit env
+# value overrides for robustness checks.
+SF_TRIG_SRC="env"
+if [ "$SF_TRIG_CORR" = "auto" ]; then
+  SF_TRIG_CORR=$(awk '$1=="#!" && $2=="muTrig" && $3=="corr" {print $4; exit}' "${WMU%.root}_systs.txt" 2>/dev/null || true)
+  if [ -n "$SF_TRIG_CORR" ]; then SF_TRIG_SRC="auto: muon W sidecar directive"
+  else SF_TRIG_CORR="coherent"; SF_TRIG_SRC="auto: no directive in the muon W sidecar -> coherent (only matters for a separate muTrig nuisance)"; fi
+fi
+case "$SF_TRIG_CORR" in
+  perbin|coherent) ;;
+  *) echo "[make_pO_simfit_cards] ERROR SF_TRIG_CORR='$SF_TRIG_CORR' (auto | perbin | coherent)" >&2; exit 2 ;;
+esac
+# theory vs lepton-SF split (the two --freezeNuisanceGroups groups)
+THNAMES=""; SFNAMES=""
+for s in $LHENAMES; do
+  case " $LHE_THEORY " in *" $s "*) THNAMES="$THNAMES $s" ;; *) SFNAMES="$SFNAMES $s" ;; esac
+done
+THNAMES="${THNAMES# }"; SFNAMES="${SFNAMES# }"
 # fifth `shapes` token (Combine appends Up/Down to $SYSTEMATIC); empty when no systs
 SY=""; [ "$NLHE" -gt 0 ] && SY='_$SYSTEMATIC'
 
-# Append one entry per LHE shape row for a block of process columns:
-#   $1 = W | Z | CR (which sidecar list applies; CR = never), $2.. = the
-#   HISTOGRAM names of the columns in MP order (zsig -> signal).
+# Append one entry per shape row for a block of process columns:
+#   $1 = W | Z | CR (which input's list applies; CR = never), $2 = mu | ele
+#   (which flavour's input), $3.. = the HISTOGRAM names of the columns in MP
+#   order (zsig -> signal).
 # ALIGNMENT RULE: call it in every block that appends to MB/MP/MI/MR, with
 # exactly as many names as columns.
 lhe_append() {
-  local kind="$1"; shift
+  local kind="$1" flav="$2"; shift 2
   local i=0 s p e plist
   for s in $LHENAMES; do
     e=""
     plist=""
-    [ "$kind" = "W" ] && plist="${LHEPW[$i]}"
-    [ "$kind" = "Z" ] && plist="${LHEPZ[$i]}"
+    if [ "$kind" = "W" ]; then
+      if [ "$flav" = "mu" ]; then plist="${LHEP_W_MU[$i]}"; else plist="${LHEP_W_ELE[$i]}"; fi
+    elif [ "$kind" = "Z" ]; then
+      if [ "$flav" = "mu" ]; then plist="${LHEP_Z_MU[$i]}"; else plist="${LHEP_Z_ELE[$i]}"; fi
+    fi
     for p in "$@"; do
       case " $plist " in *" $p "*) e="$e 1" ;; *) e="$e -" ;; esac
     done
@@ -240,7 +300,7 @@ shapes qcd      ${CH} ${WF} ${R}/${QPATH}"
         MP="$MP signal z ztau wtau qcd"
         MI="$MI 0 1 2 3 4"
         MR="$MR -1 -1 -1 -1 -1"
-        lhe_append W signal z ztau wtau qcd
+        lhe_append W "$F" signal z ztau wtau qcd
         if [ "$QCD_MODE" = "free" ]; then
           RP="${RP}
 qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
@@ -287,7 +347,7 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
     SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
     SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
     SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
-    lhe_append Z signal w wtau ztau
+    lhe_append Z "$F" signal w wtau ztau
     NCH=$((NCH+1))
   done
 
@@ -320,7 +380,7 @@ shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
           SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
           SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
           SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
-          lhe_append CR qcd z ztau wfix
+          lhe_append CR "$F" qcd z ztau wfix
         else
           MB="$MB $CH $CH $CH"
           MP="$MP qcd z ztau"
@@ -329,7 +389,7 @@ shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
           SQMWP="$SQMWP - - -"; SQMWM="$SQMWM - - -"
           SQEWP="$SQEWP - - -"; SQEWM="$SQEWM - - -"
           SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN}"
-          lhe_append CR qcd z ztau
+          lhe_append CR "$F" qcd z ztau
           # per-y W content: card process w_y<i> <- histogram w_<B>_y<i>
           # (lab and fb cards MUST wire their own split -- see the header note)
           PIDX=8
@@ -339,7 +399,7 @@ shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
             MB="$MB $CH"; MP="$MP w_y${iy}"; MI="$MI $PIDX"; MR="$MR -1"
             SQMWP="$SQMWP -"; SQMWM="$SQMWM -"; SQEWP="$SQEWP -"; SQEWM="$SQEWM -"
             SLUMI="$SLUMI ${LUMI_LNN}"
-            lhe_append CR w_y${iy}
+            lhe_append CR "$F" w_y${iy}
             PIDX=$((PIDX+1))
           done
         fi
@@ -359,7 +419,7 @@ shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
           SQMWP="$SQMWP - -"; SQMWM="$SQMWM - -"
           SQEWP="$SQEWP - -"; SQEWM="$SQEWM - -"
           SLUMI="$SLUMI - ${LUMI_LNN}"
-          lhe_append CR qcd ewk
+          lhe_append CR "$F" qcd ewk
           NCH=$((NCH+1))
         done
         # --- the three free scales + the functional SR multiplier -------------
@@ -385,18 +445,43 @@ ${SQMWM}
 ${SQEWP}
 ${SQEWM}"
   fi
-  # LHE shape rows (2026-09-07) + the `lhe` group for --freezeNuisanceGroups
+  # shape rows (2026-09-07 LHE, 2026-09-14 lepton SFs) + the groups for
+  # --freezeNuisanceGroups: `lhe` = the theory ones, `lepsf` = the lepton-SF
+  # ones (after the per-bin split below)
   i=0
   for s in $LHENAMES; do
     SYST="${SYST}
 ${SLHE[$i]}"
     i=$((i+1))
   done
-  LHEDESC="no LHE shape systematics (LHE_SYST=${LHE_SYST})"
+  # muTrig per-bin decorrelation (2026-09-14, SF_TRIG_CORR=perbin): the MB
+  # trigger SF's per-y errors are pure statistics, so the ONE coherent template
+  # variation is split into 12 independent nuisances muTrig_y<i> -- one per
+  # rapidity bin, both charges, every muon W column of that bin -- with
+  # Combine's `nuisance edit rename` (process '*', channel regex, full match),
+  # which maps each new name back to the SAME <proc>_muTrigUp/Down histograms
+  # (DatacardParser.systematicsShapeMap; no duplicated templates). The Z-peak
+  # piece stays under `muTrig` (a two-leg factor of 1 +- 1e-4). The edit lines
+  # go at the END of the card (after the rateParams), as Combine documents.
+  SFEDIT=""; SFALL="$SFNAMES"
+  if [ "$SF_TRIG_CORR" = "perbin" ]; then
+    case " $LHENAMES " in *" muTrig "*)
+      for iy in $YBINS; do
+        SFEDIT="${SFEDIT}
+nuisance edit rename * mu_W[pm]_${B}_y${iy} muTrig muTrig_y${iy}"
+        SFALL="$SFALL muTrig_y${iy}"
+      done ;;
+    esac
+  fi
+  NUISLIST="$THNAMES $SFALL"   # every shape nuisance of the card, post-edit names (for the sidecar)
+  LHEDESC="no shape systematics (LHE_SYST=${LHE_SYST})"
   if [ "$NLHE" -gt 0 ]; then
-    SYST="${SYST}
-lhe group = ${LHENAMES}"
-    LHEDESC="LHE shape systematics (group lhe): ${LHENAMES} on the MC processes (<proc>_<syst>Up/Down from the input files' sidecars)"
+    [ -n "$THNAMES" ] && SYST="${SYST}
+lhe group = ${THNAMES}"
+    [ -n "$SFALL" ] && SYST="${SYST}
+lepsf group = ${SFALL}"
+    LHEDESC="shape systematics -- theory (group lhe): ${THNAMES:-none}; lepton SFs (group lepsf): ${SFALL:-none}; <proc>_<syst>Up/Down from the input files' sidecars, entries only on the columns of the inputs listing them"
+    [ -n "$SFEDIT" ] && LHEDESC="${LHEDESC}; muTrig decorrelated per rapidity bin via nuisance edit rename (SF_TRIG_CORR=perbin)"
   fi
   if [ "$QCD_MODE" = "free" ]; then
     QDESC="qcd_norm free rateParam per W channel"
@@ -427,7 +512,7 @@ ${MB}
 ${MP}
 ${MI}
 ${MR}
-------------${SYST}${RP}
+------------${SYST}${RP}${SFEDIT}
 EOF
 
   # ---- the model: one 'map=' per line, consumed as --PO map=... at t2w time ---
@@ -467,18 +552,22 @@ gen_simfit_card fb
 KQM="$QCD_LNN_MU"; KQE="$QCD_LNN_ELE"
 if [ "$QCD_MODE" = "free" ]; then KQM=0; KQE=0; fi
 if [ "$QCD_MODE" = "abcd" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
-# lheSysts (2026-09-07): the LHE shape nuisances in the cards, comma-joined
-# ("none" when off/absent) -- the extractor reports their pulls and includes
+# lheSysts (2026-09-07): ALL shape nuisances in the cards, comma-joined, by
+# their POST-EDIT names (theory + lepton SFs incl. the per-bin muTrig_y<i>;
+# "none" when off/absent) -- the extractor reports their pulls and includes
 # them in the Asimov closure; postfit_incl.C switches to shapes_fit_s on it.
-LHELIST=$(echo "$LHENAMES" | tr ' ' ','); LHELIST="${LHELIST:-none}"
+# The key keeps its 2026-09-07 name for the readers; sfTrigCorr records the
+# muTrig correlation choice.
+LHELIST=$(echo "$NUISLIST" | tr -s ' ' ',' | sed 's/^,//; s/,$//'); LHELIST="${LHELIST:-none}"
 cat > "$OUTDIR/qcd_lnn_kappas.txt" <<EOF
 kQcdMu $KQM
 kQcdEle $KQE
 kLumi $LUMI_LNN
 qcdMode $QCD_MODE
 lheSysts $LHELIST
+sfTrigCorr $SF_TRIG_CORR
 EOF
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (W discriminant: ${DISCLABEL})"
 echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (mu ${KQM} / ele ${KQE}); lumi lnN ${LUMI_LNN}"
-echo "[make_pO_simfit_cards] LHE shape systematics: ${LHELIST} (LHE_SYST=${LHE_SYST})"
+echo "[make_pO_simfit_cards] shape systematics: theory [${THNAMES:-none}] lepton SF [${SFALL:-none}] (LHE_SYST=${LHE_SYST}, SF_TRIG_CORR=${SF_TRIG_CORR} from ${SF_TRIG_SRC})"
