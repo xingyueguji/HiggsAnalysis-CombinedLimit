@@ -126,8 +126,18 @@ mkdir -p "$OUTDIR"
 #        (9.1% e+, ~0% e- taken as accidental)           (+) anti-iso tilt 15%
 #        = 18.5%  -> 1.20
 # Override for robustness scans, e.g.  QCD_LNN_MU=1.3 QCD_LNN_ELE=1.3 ./run_pO_fits.sh ...
-QCD_MODE="${QCD_MODE:-lnN}"        # lnN | free | abcd  (free = pre-2026-08-17 model;
-                                   #  abcd = in-fit ABCD, leppt_mt40 only, 2026-08-23)
+# QCD_MODE: lnN | free | abcd  (free = pre-2026-08-17 model; abcd = the in-fit
+# ABCD, 2026-08-23).  DEFAULT FLIPPED TO abcd 2026-09-15b (user decision) -- but
+# only where it is defined: the qcd_abcd template and the CR dirs exist ONLY in
+# combine_input_W_leppt_mt40.root, and abcd hard-errors on any other
+# discriminant (guard below).  So the default is DISC-DEPENDENT: abcd for the
+# primary leppt_mt40, lnN for met / leppt, which keeps those variants runnable
+# instead of exiting 2 and taking the whole simfit with them.  An explicit
+# QCD_MODE=... still wins (QCD_MODE=lnN is the like-for-like comparison).
+if [ -z "${QCD_MODE:-}" ]; then
+  if [ "$DISC" = "leppt_mt40" ]; then QCD_MODE=abcd; else QCD_MODE=lnN; fi
+  echo "[make_pO_simfit_cards] QCD_MODE not set -> default '$QCD_MODE' for disc '$DISC'"
+fi
 QCD_LNN_MU="${QCD_LNN_MU:-1.15}"
 QCD_LNN_ELE="${QCD_LNN_ELE:-1.20}"
 # abcd-mode REDUCED kappas (residual on the SR qcd only: anti-iso window (+)
@@ -146,6 +156,11 @@ LUMI_LNN="${LUMI_LNN:-1.03}"       # +-3% on kLumi_invnb = 46.5 nb^-1 (all MC)
 LHE_SYST="${LHE_SYST:-auto}"       # auto | off | comma list (see header)
 SF_TRIG_CORR="${SF_TRIG_CORR:-auto}"    # auto (the muon W sidecar's '#! muTrig corr' directive, coherent if
                                         #  absent) | perbin | coherent -- see header
+SIGMA_POI="${SIGMA_POI:-0}"        # 1 -> ALSO write t2w_maps_simfit_<B>_sigma.txt, the
+                                   #  reparametrization that makes the rapidity-inclusive
+                                   #  sigma_W a POI (same card; see write_sigma_maps)
+GEN_XSEC_FID="${GEN_XSEC_FID:-}"   # gen fiducial sigma sidecar (skim/output/gen_xsec_fid.txt);
+                                   #  required by SIGMA_POI=1, ignored otherwise
 
 if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
@@ -537,6 +552,95 @@ EOF
   echo "map=.*/(z|ztau|zsig)\$:r_Z[1,0,10]" >> "$MAPS"
 
   echo "[make_pO_simfit_cards] wrote $(basename "$CARD") (${NCH} channels) + $(basename "$MAPS") ($(wc -l < "$MAPS" | tr -d ' ') maps)"
+
+  if [ "$SIGMA_POI" = "1" ]; then
+    write_sigma_maps "$B"
+  else
+    # never leave a stale sigma map next to freshly generated cards: it would
+    # look like a valid model definition for a card it was not built from
+    rm -f "$OUTDIR/t2w_maps_simfit_${B}_sigma.txt"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# SIGMA_POI=1 (2026-09-15): a SECOND map file per variant that reparametrizes
+# the SAME datacard so the rapidity-inclusive W cross section is itself a POI.
+#
+#   sigma_W = Sum_i r_i sigma_gen-fid,i   is a fixed linear combination of the
+#   24 per-bin POIs, so promoting it is a pure change of variables:
+#
+#       POIs   sigmaW, a_<C>_y<i>  (23 free; ONE bin is the anchor, a == 1)
+#       funcs  Wnorm = G_anchor + Sum_j a_j G_j
+#              r_i   = sigmaW * a_i / Wnorm      (anchor: r = sigmaW / Wnorm)
+#
+#   => Sum_i r_i G_i == sigmaW identically (verified to 6e-16 in RooFit), and
+#   a_i == 1 with sigmaW = Sum_i G_i reproduces r_i == 1, so the Asimov closure
+#   point is unchanged. The profile likelihood is invariant under a bijective
+#   reparametrization, so the best fit and the PROFILED interval of sigma_W are
+#   the exact ones -- which is the whole point: the Hesse/covariance ellipse
+#   that plotting/xsec_contour.C draws from the nominal fit is the GAUSSIAN
+#   approximation to this, and this is what validates it (and what a genuine
+#   `MultiDimFit --algo grid -P sigmaW -P r_Z` contour needs).
+#
+# Chosen over the "redefine one bin as sigma_total - sum(others)" subtraction
+# because the subtraction sends that bin's yield NEGATIVE once sigmaW is scanned
+# ~1.4 sigma down (the largest bin carries only ~5% of the total), which is well
+# inside a 95% CL contour; the ratio form keeps every r_i > 0 by construction.
+#
+# The per-bin gen fiducial cross sections G_i come from the analysis repo's
+# skim/output/gen_xsec_fid.txt (written by skim/gen_xsec.C) -- they must be
+# baked in because sigma_W is that specific combination. NOTE they are the
+# NOMINAL-PDF values, the same approximation plotting/xsec_fiducial.C makes.
+#
+# The DATACARD is untouched: POIs live in the map, so one card serves both
+# parametrizations and nothing about the nominal fit changes.
+# ---------------------------------------------------------------------------
+write_sigma_maps() {
+  B="$1"
+  SMAPS="$OUTDIR/t2w_maps_simfit_${B}_sigma.txt"
+  if [ ! -f "$GEN_XSEC_FID" ]; then
+    echo "[make_pO_simfit_cards][ERROR] SIGMA_POI=1 but gen sidecar not found: $GEN_XSEC_FID"
+    echo "                              (run skim/gen_xsec.C, then sync_lxplus.sh upload)"
+    return 1
+  fi
+  awk -v B="$B" -v QMODE="$QCD_MODE" -v QWCR="$QCD_WCR" '
+    /^#/ { next }
+    $1 == B { key = $2 "_y" $3; g[key] = $4 + 0; order[++n] = key; tot += $4 }
+    END {
+      if (n != 24) { printf "[ERROR] %d (not 24) %s rows in the gen sidecar\n", n, B > "/dev/stderr"; exit 2 }
+      anchor = order[n]
+      printf "map=__poi_decl__/__poi_decl__:sigmaW[%.6f,0,%.6f]\n", tot, 4 * tot
+      terms = ""; args = ""; k = 0
+      for (i = 1; i <= n; i++) {
+        if (order[i] == anchor) continue
+        printf "map=__poi_decl__/__poi_decl__:a_%s[1,0,10]\n", order[i]
+        terms = terms sprintf("%s@%d*%.6f", (k ? "+" : ""), k, g[order[i]])
+        args  = args  sprintf("%sa_%s", (k ? "," : ""), order[i])
+        k++
+      }
+      # Wnorm must be declared BEFORE the r_* expressions that use it:
+      # MultiSignalModel runs factory statements in map-file order.
+      printf "map=__fn_decl__/__fn_decl__:Wnorm=expr;;Wnorm(\"%.6f+%s\",%s)\n", g[anchor], terms, args
+      for (i = 1; i <= n; i++) {
+        key = order[i]; split(key, p, "_y"); C = p[1]; iy = p[2]
+        # ONE line per POI carrying BOTH patterns (multiSignalModel splits the
+        # map list on commas): re-listing a factory-defined name on a second
+        # plain map= line would push it into the POI set as a bare variable and
+        # collide with the RooFormulaVar.
+        pat = sprintf("(mu|ele)_%s_%s_y%s/(signal|wtau)$", C, B, iy)
+        if (QMODE == "abcd" && QWCR != "frozen")
+          pat = pat sprintf(",(mu|ele)_%s_CRB/w_y%s$", C, iy)
+        if (key == anchor)
+          printf "map=%s:r_%s=expr;;r_%s(\"@0/@1\",sigmaW,Wnorm)\n", pat, key, key
+        else
+          printf "map=%s:r_%s=expr;;r_%s(\"@0*@1/@2\",sigmaW,a_%s,Wnorm)\n", pat, key, key, key
+      }
+      print "map=.*/(z|ztau|zsig)$:r_Z[1,0,10]"
+      printf "[make_pO_simfit_cards] %s: sigmaW anchored on %s, Sum_i sigma_gen,i = %.4f nb\n",
+             B, anchor, tot > "/dev/stderr"
+    }' "$GEN_XSEC_FID" > "$SMAPS" || { echo "[make_pO_simfit_cards][ERROR] sigma-map generation failed for $B"; rm -f "$SMAPS"; return 1; }
+  echo "[make_pO_simfit_cards] wrote $(basename "$SMAPS") ($(wc -l < "$SMAPS" | tr -d ' ') maps, sigmaW + 23 a + r_Z = 25 POIs)"
 }
 
 gen_simfit_card lab

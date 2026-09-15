@@ -16,7 +16,7 @@ Branch: all pO code is on `zheng/po-analysis` (`main` is stock Combine —
 ```bash
 cd HiggsAnalysis-CombinedLimit/test
 cmsenv
-./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|simfit|all] [--dry-run] [--no-postfit] [--draw-only] [--asimov]
+./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|simfit|all] [--dry-run] [--no-postfit] [--draw-only] [--asimov] [--statonly] [--extract-only]
 
 # DEFAULT (2026-08-04) = simfit, the GRAND SIMULTANEOUS FIT: one likelihood per
 # binning variant (lab, fb) with all 48 W channels ({mu,ele} x {Wp,Wm} x y0..11)
@@ -49,6 +49,12 @@ cmsenv
 # the sidecar's '#! muTrig corr' directive (coherent for an inclusive trigger
 # SF; perbin -> muTrig split into muTrig_y0..11 with `nuisance edit rename`).
 # Stat-only: --freezeNuisanceGroups lhe,lepsf
+# Stat/syst split of every POI error (2026-09-15): the extractor conditions the
+# nominal fit's covariance matrix on the constrained nuisances (Schur
+# complement = the frozen-nuisance result, no refit) -> rErr_stat (19th CSV
+# col), simfit_<B>_stat summary rows, h_cov_yield[_FB]_stat; --statonly adds
+# the frozen-nuisance refit as a cross-check (simfit_<B>_statonlyfit rows);
+# --extract-only re-runs just the extraction on an existing fits/ tree.
 ./run_pO_fits.sh --asimov
 QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
 LHE_SYST=off ./run_pO_fits.sh both simfit --disc leppt_mt40             # no theory shape nuisances
@@ -88,6 +94,8 @@ SF_TRIG_CORR=perbin QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40
 | `--dry-run` | build datacards only (no `cmsenv` needed) |
 | `--no-postfit` | skip postfit plots |
 | `--asimov` | (simfit) also fit the prefit Asimov dataset per variant — closure: every POI = 1 |
+| `--statonly` | (simfit) ALSO run the frozen-nuisance companion fit per variant (all constrained nuisances frozen at their post-fit values → `fitDiagnostics_simfit_<B>_statonly.root`) as a CROSS-CHECK. The stat component itself needs no extra fit: the extractor conditions the nominal fit's covariance matrix on the constrained nuisances (Schur complement = the Gaussian-exact frozen-nuisance result) → `rErr_stat` (19th CSV col), `simfit_<B>_stat` summary rows, `h_cov_yield[_FB]_stat`; `xsec_fiducial_comb` draws inner stat / outer total bars from them. When the companion exists it is reported as `simfit_<B>_statonlyfit` rows plus the printed max deviation from the conditioned errors |
+| `--extract-only` | (simfit) re-run only the extraction on an EXISTING `fits/` tree (only `root`, no `cmsenv`) — e.g. on a downloaded lxplus fit after an extractor change. Prefit integrals from the work-dir input copies, else the analysis plots dir; the extractor checks them against the fit's own `shapes_prefit` and WARNs if they are not the inputs that were fitted. `sync_lxplus.sh download` pulls the nominal, `_statonly` and `_asimov` fitDiagnostics so the local re-extraction is complete |
 | `--draw-only` | redraw postfit plots from EXISTING fits (no `combine`/`cmsenv`, only `root`) — e.g. after cosmetic changes to `draw_postfit_pO.C`. Respects channel+mode; needs the `fits/` tree from a previous run (not pulled by `sync_lxplus.sh download` — redraw where the fits ran, then `download --postfit`) |
 
 Per region: `text2workspace` → `combine -M FitDiagnostics --saveShapes

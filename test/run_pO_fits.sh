@@ -32,10 +32,14 @@
 #   Mode 'simfit' (2026-08-04, the DEFAULT) = the GRAND SIMULTANEOUS FIT: all 48 (flavour,
 #   charge, y-bin) W channels + BOTH Z peaks in ONE likelihood per binning
 #   variant (lab, fb).  25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z
-#   scaling all DY-related MC; QCD lnN-constrained at the ABCD prediction per
-#   (flavour, charge) + global lumi lnN on all MC (2026-08-17 default; env
-#   QCD_MODE/QCD_LNN_MU/QCD_LNN_ELE/LUMI_LNN -> make_pO_simfit_cards.sh;
-#   QCD_MODE=free restores the 48 free qcd_norm rateParams; QCD_MODE=abcd
+#   scaling all DY-related MC; global lumi lnN on all MC.  QCD: the DEFAULT is
+#   DISC-DEPENDENT since 2026-09-15b -- QCD_MODE=abcd (the IN-FIT ABCD) for the
+#   primary --disc leppt_mt40, QCD_MODE=lnN (log-normal-constrained at the ABCD
+#   prediction per flavour+charge) for met/leppt, where the qcd_abcd template
+#   and the CR dirs do not exist.  Env QCD_MODE/QCD_LNN_MU/QCD_LNN_ELE/LUMI_LNN
+#   -> make_pO_simfit_cards.sh and an explicit QCD_MODE always wins
+#   (QCD_MODE=lnN on leppt_mt40 = the like-for-like comparison; QCD_MODE=free
+#   restores the 48 free qcd_norm rateParams).  QCD_MODE=abcd
 #   (2026-08-23, --disc leppt_mt40 ONLY) = the IN-FIT ABCD: 12 counting CR
 #   channels + free scales qcd_s{B,C,D}_<F>_<C> + the formula rateParam
 #   (sB*sC/sD) on the SR qcd_abcd template, so the QCD normalization floats
@@ -54,7 +58,10 @@
 #   mode 'all' = the full legacy per-flavour pipeline PLUS simfit.
 #   options:
 #     --disc met|leppt|leppt_mt40
-#                       W discriminant (default met = PF MET shape).
+#                       W discriminant (default leppt_mt40 = the PRIMARY one;
+#                       the help said "met" until 2026-09-15b, stale since the
+#                       2026-08-16 switch -- the code default is DISC above).
+#                       met        = PF MET shape (the backup variant)
 #                       leppt      = lepton pT, plain W selection
 #                       leppt_mt40 = lepton pT with the pT>25 && m_T>40 selection
 #                       Reads combine_input_W[_leppt[_mt40]].root and writes to
@@ -68,6 +75,28 @@
 #                       use after cosmetic changes to draw_postfit_pO.C)
 #     --asimov          (simfit only) also run a prefit-Asimov closure fit per
 #                       variant (-t -1): every fitted POI must come back at 1
+#     --no-statonly     (simfit only) SKIP the frozen-nuisance companion fit.
+#                       It is ON by default (2026-09-15b) and is THE source of
+#                       the quoted statistical error: all constrained nuisances
+#                       frozen at their post-fit values, so the POI errors that
+#                       come back are the stat component and downstream
+#                       syst = sqrt(total^2 - stat^2). Skipping it makes the
+#                       extractor fall back to the conditioned covariance of the
+#                       nominal fit (Gaussian-exact, no extra fit) -- which it
+#                       computes either way, as the cross-check.
+#     --no-contour      (simfit only) SKIP the profiled (sigma_W, sigma_Z) scan.
+#                       ON by default (2026-09-15b). ADDITIVE: same datacard, an
+#                       extra map file that promotes the rapidity-inclusive
+#                       sigma_W to a POI, its own workspace and its own output
+#                       dir contour/contour_<B>/ -- it overwrites nothing from
+#                       the nominal fit and the extraction never reads it.
+#                       Needs skim/output/gen_xsec_fid.txt; missing -> the pass
+#                       is skipped with a WARN, the other two still run.
+#     --extract-only    (simfit only) re-run ONLY the extraction on an EXISTING
+#                       fits/ tree (no combine; e.g. on a downloaded fit after an
+#                       extractor change). Prefit integrals from the input copies
+#                       in the work dir, else from the analysis plots dir -- the
+#                       extractor checks them against the fit's own shapes_prefit
 #     --plots-dir DIR   analysis plots dir (else $PO_PLOTS, else autodetect)
 #     --out DIR         output root (default test/pO_fit_out)
 #
@@ -79,7 +108,14 @@ set -uo pipefail   # NOT -e: per-bin fit failures must not abort the whole loop
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-CHAN_ARG="both"; MODE="simfit"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0; ASIMOV=0
+# A simfit run does THREE fits per binning variant by default (2026-09-15b):
+#   (1) the nominal fit          -> fits/simfit_<B>/fitDiagnostics_simfit_<B>.root
+#   (2) the --statonly companion -> ..._statonly.root  (THE stat error source)
+#   (3) the --contour scan       -> contour/contour_<B>/  (sigma_W as a POI)
+# (2) and (3) are additive: separate output files, nothing of (1) is overwritten.
+# Turn them off with --no-statonly / --no-contour.
+CHAN_ARG="both"; MODE="simfit"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0; ASIMOV=0; STATONLY=1; EXTRACTONLY=0
+CONTOUR=1; CONTOUR_POINTS="${CONTOUR_POINTS:-2500}"
 DISC="leppt_mt40"; OUT_SET=0
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
@@ -93,6 +129,11 @@ while [ $# -gt 0 ]; do
     --no-postfit)              DO_POSTFIT=0 ;;
     --draw-only)               DRAWONLY=1 ;;
     --asimov)                  ASIMOV=1 ;;
+    --statonly)                STATONLY=1 ;;   # (the default since 2026-09-15b; kept as a no-op)
+    --no-statonly)             STATONLY=0 ;;   # stat then falls back to the conditioned covariance
+    --extract-only)            EXTRACTONLY=1 ;;
+    --contour)                 CONTOUR=1 ;;    # (the default since 2026-09-15b; kept as a no-op)
+    --no-contour)              CONTOUR=0 ;;    # skip the (sigmaW, r_Z) profiled 2D scan
     --plots-dir)               shift; PO_PLOTS="${1:-}" ;;
     --disc)                    shift; DISC="${1:?--disc needs a value: met|leppt|leppt_mt40}" ;;
     --out)                     shift; OUTROOT="${1:?--out needs a directory}"; OUT_SET=1 ;;
@@ -115,7 +156,8 @@ WINNAME="combine_input_W${DSUF}.root"
 if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
 
 # ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
-# ---- the combine_input_*.root copies already in the work dir) ---------------
+# ---- the combine_input_*.root copies already in the work dir; for ----------
+# ---- --extract-only it is only the FALLBACK when those copies are absent) ---
 if [ "$DRAWONLY" -eq 0 ]; then
   if [ -z "$PO_PLOTS" ]; then
     for d in $PO_PLOTS_DEFAULTS; do
@@ -123,27 +165,32 @@ if [ "$DRAWONLY" -eq 0 ]; then
     done
   fi
   if [ -z "$PO_PLOTS" ] || [ ! -d "$PO_PLOTS" ]; then
-    echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
-    echo "        dir containing $WINNAME (run plotting/mtandmet.C +"
-    echo "        dileptonpeak.C first)."
-    exit 2
+    if [ "$EXTRACTONLY" -eq 1 ]; then
+      echo "[WARN] analysis plots dir not found -- --extract-only will rely on the input copies in the work dir."
+      PO_PLOTS=""
+    else
+      echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
+      echo "        dir containing $WINNAME (run plotting/mtandmet.C +"
+      echo "        dileptonpeak.C first)."
+      exit 2
+    fi
   fi
-  echo "[run_pO_fits] plots dir : $PO_PLOTS"
+  [ -n "$PO_PLOTS" ] && echo "[run_pO_fits] plots dir : $PO_PLOTS"
 fi
-echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY    asimov: $ASIMOV"
+echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY    extract-only: $EXTRACTONLY    asimov: $ASIMOV    statonly (stat source): $STATONLY    contour: $CONTOUR"
 
 # ---- cmsenv check -----------------------------------------------------------
 HAVE_COMBINE=1
 command -v combine          >/dev/null 2>&1 || HAVE_COMBINE=0
 command -v text2workspace.py >/dev/null 2>&1 || HAVE_COMBINE=0
-if [ "$DRYRUN" -eq 0 ] && [ "$DRAWONLY" -eq 0 ] && [ "$HAVE_COMBINE" -eq 0 ]; then
+if [ "$DRYRUN" -eq 0 ] && [ "$DRAWONLY" -eq 0 ] && [ "$EXTRACTONLY" -eq 0 ] && [ "$HAVE_COMBINE" -eq 0 ]; then
   echo "[ERROR] combine / text2workspace.py not on PATH -- did you cmsenv?"
   echo "        (run with --dry-run to only build datacards.)"
   exit 3
 fi
 command -v root >/dev/null 2>&1 || { echo "[WARN] root not on PATH: extraction/postfit will be skipped."; }
-if [ "$DRAWONLY" -eq 1 ] && ! command -v root >/dev/null 2>&1; then
-  echo "[ERROR] --draw-only needs root on PATH."; exit 3
+if { [ "$DRAWONLY" -eq 1 ] || [ "$EXTRACTONLY" -eq 1 ]; } && ! command -v root >/dev/null 2>&1; then
+  echo "[ERROR] --draw-only / --extract-only need root on PATH."; exit 3
 fi
 
 # ---- region list for a mode -------------------------------------------------
@@ -300,6 +347,25 @@ fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
             --saveShapes --saveWithUncertainties --skipBOnlyFit \
             -n "_simfit_${B}" --cminDefaultMinimizerStrategy 0 >fit.log 2>&1 \
       || { echo "  [FAIL fit] simfit_$B (see $RD/fit.log)"; exit 1; }
+    if [ "$STATONLY" -eq 1 ]; then
+      # OPTIONAL frozen-nuisance companion (--statonly, 2026-09-14/15): re-fit
+      # with every CONSTRAINED nuisance frozen at its POST-FIT value (the
+      # Combine breakdown recipe: freeze at the best fit, not at 0), so the
+      # POIs land at the same minimum and their errors are the statistical
+      # component. Since 2026-09-15 this is a CROSS-CHECK only: the extractor
+      # derives the same stat component from the nominal fit's covariance
+      # matrix (conditioned on the constrained nuisances -- Gaussian-exact, no
+      # refit) and, when this file exists, prints the maximal deviation between
+      # the two. The unconstrained rateParams (the in-fit ABCD scales, qcd_norm
+      # in free mode) keep floating in both -- they are data-driven statistics.
+      SETNUIS=$(root -l -b -q -e 'TFile f("fitDiagnostics_simfit_'"$B"'.root"); auto fr = (RooFitResult*)f.Get("fit_s"); TString s; if (fr) for (auto p : fr->floatParsFinal()) { TString n = p->GetName(); if (n.BeginsWith("r_") || n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm")) continue; s += TString::Format("%s%s=%.10g", s.Length() ? "," : "", n.Data(), ((RooRealVar*)p)->getVal()); } printf("SETNUIS %s\n", s.Data());' 2>/dev/null | awk '$1=="SETNUIS"{print $2}')
+      if [ -n "$SETNUIS" ]; then SETOPT=(--setParameters "$SETNUIS"); echo "  [statonly] simfit_$B: nuisances frozen at their post-fit values ($(echo "$SETNUIS" | tr ',' '\n' | wc -l | tr -d ' ') parameters)"
+      else SETOPT=(); echo "  [statonly] WARN simfit_$B: could not read the post-fit nuisance values -> frozen at their nominal values"; fi
+      combine -M FitDiagnostics workspace.root \
+              --skipBOnlyFit --freezeParameters allConstrainedNuisances "${SETOPT[@]}" \
+              -n "_simfit_${B}_statonly" --cminDefaultMinimizerStrategy 0 >fit_statonly.log 2>&1 \
+        || { echo "  [FAIL statonly] simfit_$B (see $RD/fit_statonly.log)"; exit 1; }
+    fi
     if [ "$ASIMOV" -eq 1 ]; then
       # Prefit S+B Asimov closure: every fitted POI must return 1.
       # NB plain `-t -1` generates the BACKGROUND-ONLY Asimov (src/Combine.cc:844
@@ -317,6 +383,80 @@ fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
         || { echo "  [FAIL asimov] simfit_$B (see $RD/fit_asimov.log)"; exit 1; }
     fi
   ) && echo "  [ok] simfit_$B"
+}
+
+# =============================================================================
+# fit_contour -- the PROFILED (sigma_W, sigma_Z) contour (--contour, 2026-09-15)
+#
+# Same 62-channel datacard, different map file: t2w_maps_simfit_<B>_sigma.txt
+# reparametrizes the 24 per-bin POIs as (sigmaW, 23 shape parameters) so the
+# rapidity-inclusive fiducial W cross section is a POI in its own right
+# (make_pO_simfit_cards.sh::write_sigma_maps). Profile likelihood is invariant
+# under a reparametrization, so the best fit is IDENTICAL to the nominal one --
+# what this buys is the exact profiled 2D region, of which the covariance
+# ellipse that plotting/xsec_contour.C builds from the nominal fit is the
+# Gaussian approximation.
+#
+# sigma_Z = r_Z * sigma_gen-fid,Z is a one-to-one rescaling of r_Z, so r_Z is
+# scanned as-is and the Z axis is converted downstream -- no second POI needed.
+#
+# Two combine calls: `--algo singles` locates the minimum and gives the 1D
+# errors, which set the grid window (+-4 sigma); then `--algo grid` scans.
+# =============================================================================
+fit_contour() {  # $1 = lab | fb
+  B="$1"
+  card="$SDCD/datacard_simfit_${B}.txt"; smaps="$SDCD/t2w_maps_simfit_${B}_sigma.txt"
+  if [ ! -f "$card" ] || [ ! -f "$smaps" ]; then echo "  [skip] no simfit card / sigma maps for $B"; return; fi
+  RD="$SCONT/contour_$B"; mkdir -p "$RD"
+  PO=(-P HiggsAnalysis.CombinedLimit.PhysicsModel:multiSignalModel --PO verbose)
+  while IFS= read -r m; do [ -n "$m" ] && PO+=(--PO "$m"); done < "$smaps"
+  (
+    cd "$RD" || exit 1
+    text2workspace.py "$card" -o workspace_sigma.root "${PO[@]}" >t2w.log 2>&1 \
+      || { echo "  [FAIL t2w] contour_$B (see $RD/t2w.log)"; exit 1; }
+    combine -M MultiDimFit workspace_sigma.root --algo singles \
+            -P sigmaW -P r_Z --floatOtherPOIs 1 --saveFitResult \
+            -n "_contourfit_${B}" --cminDefaultMinimizerStrategy 0 >fit_singles.log 2>&1 \
+      || { echo "  [FAIL singles] contour_$B (see $RD/fit_singles.log)"; exit 1; }
+    # window = best fit +- 4 sigma (floored at 0 for sigmaW), from the fit result
+    RNG=$(root -l -b -q -e 'TFile f("multidimfit_contourfit_'"$B"'.root"); auto fr = (RooFitResult*)f.Get("fit_mdf"); if (fr) { auto *s = (RooRealVar*)fr->floatParsFinal().find("sigmaW"); auto *z = (RooRealVar*)fr->floatParsFinal().find("r_Z"); if (s && z) printf("RNG sigmaW=%.6g,%.6g:r_Z=%.6g,%.6g BEST %.6g %.6g %.6g %.6g\n", s->getVal()-4*s->getError()>0 ? s->getVal()-4*s->getError() : 0.0, s->getVal()+4*s->getError(), z->getVal()-4*z->getError()>0 ? z->getVal()-4*z->getError() : 0.0, z->getVal()+4*z->getError(), s->getVal(), s->getError(), z->getVal(), z->getError()); }' 2>/dev/null | awk '$1=="RNG"{print $2}')
+    BEST=$(root -l -b -q -e 'TFile f("multidimfit_contourfit_'"$B"'.root"); auto fr = (RooFitResult*)f.Get("fit_mdf"); if (fr) { auto *s = (RooRealVar*)fr->floatParsFinal().find("sigmaW"); auto *z = (RooRealVar*)fr->floatParsFinal().find("r_Z"); if (s && z) printf("BEST sigmaW %.5f +/- %.5f | r_Z %.5f +/- %.5f\n", s->getVal(), s->getError(), z->getVal(), z->getError()); }' 2>/dev/null | grep '^BEST' || true)
+    [ -n "$BEST" ] && echo "  [contour_$B] $BEST"
+    if [ -z "$RNG" ]; then
+      echo "  [FAIL range] contour_$B: could not read sigmaW/r_Z from multidimfit_contourfit_${B}.root"; exit 1
+    fi
+    combine -M MultiDimFit workspace_sigma.root --algo grid --points "$CONTOUR_POINTS" \
+            -P sigmaW -P r_Z --floatOtherPOIs 1 --saveNLL \
+            --setParameterRanges "$RNG" \
+            -n "_contour_${B}" --cminDefaultMinimizerStrategy 0 >fit_grid.log 2>&1 \
+      || { echo "  [FAIL grid] contour_$B (see $RD/fit_grid.log)"; exit 1; }
+    echo "  [contour_$B] grid: $CONTOUR_POINTS points over $RNG"
+  ) && echo "  [ok] contour_$B"
+}
+
+simfit_extract() {  # POIs + mu+e-combined yields + covariance -> $SSUMM (root only)
+  # lnN kappas + qcd mode the cards were built with (sidecar from
+  # make_pO_simfit_cards.sh; missing sidecar / 0 entries -> legacy
+  # free-rateParam extraction path; missing qcdMode line -> legacy sidecar,
+  # mode inferred from the kappas inside the extractor)
+  # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
+  # -> none); the extractor reports their pulls + closure.
+  # Also called by --extract-only (2026-09-15) on an existing fits/ tree.
+  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; KF="$SDCD/qcd_lnn_kappas.txt"
+  if [ -f "$KF" ]; then
+    KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
+    KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
+    KLU=$(awk '$1=="kLumi"{print $2}' "$KF");   KLU="${KLU:-0}"
+    QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
+    LHES=$(awk '$1=="lheSysts"{print $2}' "$KF"); LHES="${LHES:-}"
+    [ "$LHES" = "none" ] && LHES=""
+  else
+    echo "[extract] WARN no sidecar $KF -- legacy (free-rateParam) extraction assumed"
+  fi
+  if command -v root >/dev/null 2>&1; then
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\")" 2>&1 \
+      | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
+  fi
 }
 
 simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both variants
@@ -354,6 +494,7 @@ run_simfit() {
   echo ""
   echo "================ simfit: grand simultaneous fit (mu + ele) ================"
   SWORK="$OUTROOT/simfit"; SDCD="$SWORK/datacards"; SFITS="$SWORK/fits"; SPOST="$SWORK/postfit"; SSUMM="$SWORK/summary"
+  SCONT="$SWORK/contour"
   AWMU="$SWORK/combine_input_W_mu.root";  AZMU="$SWORK/combine_input_Z_mu.root"
   AWEL="$SWORK/combine_input_W_ele.root"; AZEL="$SWORK/combine_input_Z_ele.root"
 
@@ -376,6 +517,35 @@ run_simfit() {
     return
   fi
 
+  # ---- extract-only: re-run the extraction on an EXISTING fits/ tree ---------
+  # (2026-09-15; no combine needed -- e.g. on a downloaded lxplus fit after an
+  # extractor change.) The prefit signal integrals come from the input copies
+  # in the work dir when present (as on lxplus), else from the analysis plots
+  # dir; the extractor compares them with the fitted channels' shapes_prefit
+  # and WARNs when they are not the inputs that were fitted.
+  if [ "$EXTRACTONLY" -eq 1 ]; then
+    if ! ls "$SFITS"/simfit_*/fitDiagnostics_simfit_*.root >/dev/null 2>&1; then
+      echo "[ERROR] no fitDiagnostics_simfit_*.root under $SFITS -- --extract-only needs an earlier"
+      echo "        run here (or 'sync_lxplus.sh download')."
+      return
+    fi
+    if [ ! -f "$AWMU" ]; then
+      if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/$WINNAME" ]; then
+        AWMU="$PO_PLOTS/$WINNAME"; echo "[extract-only] no muon W input copy in $SWORK -> $AWMU"
+      else echo "[ERROR] --extract-only: no muon W input (neither a work-dir copy nor the plots dir)"; return; fi
+    fi
+    if [ ! -f "$AWEL" ]; then
+      if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/Elec/$WINNAME" ]; then
+        AWEL="$PO_PLOTS/Elec/$WINNAME"; echo "[extract-only] no electron W input copy in $SWORK -> $AWEL"
+      else echo "[ERROR] --extract-only: no electron W input (neither a work-dir copy nor the plots dir)"; return; fi
+    fi
+    mkdir -p "$SSUMM"
+    echo "[extract-only] re-extracting from $SFITS ..."
+    simfit_extract
+    echo "[done] extract-only -> $SSUMM/comb_W_yields.csv (+ comb_summary.csv, comb_fitted_yields.root)"
+    return
+  fi
+
   WMU_SRC="$PO_PLOTS/$WINNAME";      ZMU_SRC="$PO_PLOTS/combine_input_Z.root"
   WEL_SRC="$PO_PLOTS/Elec/$WINNAME"; ZEL_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
   miss=0
@@ -388,6 +558,26 @@ run_simfit() {
   fi
 
   mkdir -p "$SWORK" "$SDCD" "$SFITS" "$SPOST" "$SSUMM"
+  # --contour (2026-09-15): ask the card generator for the SECOND map file that
+  # promotes the rapidity-inclusive sigma_W to a POI. It needs the gen fiducial
+  # cross sections, which live in the ANALYSIS repo next to the plots dir
+  # (skim/output/gen_xsec_fid.txt, written by skim/gen_xsec.C and uploaded by
+  # sync_lxplus.sh). The card itself is unchanged either way.
+  if [ "$CONTOUR" -eq 1 ]; then
+    export SIGMA_POI=1
+    export GEN_XSEC_FID="${GEN_XSEC_FID:-$PO_PLOTS/../../skim/output/gen_xsec_fid.txt}"
+    if [ ! -f "$GEN_XSEC_FID" ]; then
+      # NOT fatal: the contour is one of three passes and the nominal fit must
+      # not die because an optional input is missing.
+      echo "[WARN] --contour needs the gen fiducial sidecar, not found: $GEN_XSEC_FID"
+      echo "       run skim/gen_xsec.C (analysis repo), then sync_lxplus.sh upload; or set GEN_XSEC_FID."
+      echo "       -> contour pass SKIPPED; the nominal and stat-only fits run as usual."
+      CONTOUR=0; unset SIGMA_POI
+    else
+      mkdir -p "$SCONT"
+      echo "[contour] sigma_W promoted to a POI; gen sidecar: $GEN_XSEC_FID"
+    fi
+  fi
   # LHE shape-systematics sidecars (2026-09-07, <input minus .root>_systs.txt):
   # travel with the inputs so the card generator finds them next to the copies
   # (absent -> no shape rows; a stale copy is removed so it cannot lie).
@@ -414,27 +604,10 @@ run_simfit() {
   fi
 
   for B in lab fb; do fit_simfit "$B"; done
+  if [ "$CONTOUR" -eq 1 ]; then for B in lab fb; do fit_contour "$B"; done; fi
 
-  # ---- extract POIs + mu+e-combined yields + covariance ----
-  # lnN kappas + qcd mode the cards were built with (sidecar from
-  # make_pO_simfit_cards.sh; missing sidecar / 0 entries -> legacy
-  # free-rateParam extraction path; missing qcdMode line -> legacy sidecar,
-  # mode inferred from the kappas inside the extractor)
-  # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
-  # -> none); the extractor reports their pulls + closure.
-  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; KF="$SDCD/qcd_lnn_kappas.txt"
-  if [ -f "$KF" ]; then
-    KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
-    KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
-    KLU=$(awk '$1=="kLumi"{print $2}' "$KF");   KLU="${KLU:-0}"
-    QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
-    LHES=$(awk '$1=="lheSysts"{print $2}' "$KF"); LHES="${LHES:-}"
-    [ "$LHES" = "none" ] && LHES=""
-  fi
-  if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\")" 2>&1 \
-      | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
-  fi
+  # ---- extract POIs + mu+e-combined yields + covariance (simfit_extract) ----
+  simfit_extract
 
   # ---- postfit plots (per channel of the grand fit: 2 variants x 50) ----
   if [ "$DO_POSTFIT" -eq 1 ] && command -v root >/dev/null 2>&1; then

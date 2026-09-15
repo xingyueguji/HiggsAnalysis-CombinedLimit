@@ -98,6 +98,17 @@ upload_inputs() {
   done
   rmkdir "$ANA_LX/plotting"
   ( cd "$ANA_LOCAL/plotting" && run --relative $SEND "$LX:$ANA_LX/plotting/" ) || err=1
+  # the gen FIDUCIAL cross sections (2026-09-15, skim/gen_xsec.C): needed by
+  # run_pO_fits.sh --contour, which bakes them into the reparametrized map file
+  # that promotes the rapidity-inclusive sigma_W to a POI. Lives outside
+  # plotting/, hence its own transfer; absent is only a note (--contour then
+  # errors with the path it looked for).
+  if [ -f "$ANA_LOCAL/skim/output/gen_xsec_fid.txt" ]; then
+    rmkdir "$ANA_LX/skim/output"
+    run "$ANA_LOCAL/skim/output/gen_xsec_fid.txt" "$LX:$ANA_LX/skim/output/" || err=1
+  else
+    echo "[note] no skim/output/gen_xsec_fid.txt (run skim/gen_xsec.C) -- --contour will not work remotely"
+  fi
 }
 
 upload_scripts() {
@@ -175,25 +186,36 @@ download_results() {
     # pulled whenever present -- the json + per-POI PDFs and correlation
     # matrices, but NOT the wd_* intermediate fit files (many
     # higgsCombine*.root, useless locally)
+    # 'contour' (--contour, 2026-09-15) holds the profiled (sigmaW, r_Z) scan;
+    # only the higgsCombine*/multidimfit* results are wanted, not the
+    # reparametrized workspaces (workspace_sigma.root is ~100 MB and useless
+    # locally -- plotting/xsec_contour.C reads only the scan tree).
     local d
-    for d in datacards impacts cov; do
+    for d in datacards impacts cov contour; do
       local rdir="$FORK_LX/test/$tree/simfit/$d"
       if rexists "$rdir"; then
         mkdir -p "$FORK_LOCAL/test/$tree/simfit/$d"
-        run --exclude 'wd_*' "$LX:$rdir/" "$FORK_LOCAL/test/$tree/simfit/$d/" || err=1
+        run --exclude 'wd_*' --exclude 'workspace_sigma.root' \
+            "$LX:$rdir/" "$FORK_LOCAL/test/$tree/simfit/$d/" || err=1
       fi
     done
     # the FitDiagnostics results themselves (2026-09-07): with LHE shape
     # nuisances in the fit the postfit shapes are no longer prefit x scale, so
     # plotting/postfit_incl.C reads shapes_fit_s from these files. Only the two
     # fitDiagnostics_simfit_<B>.root (not the workspaces/logs/higgsCombine*).
-    local B rfd
+    # (+ the _statonly companion -- since 2026-09-15b THE source of the quoted
+    # statistical error, run by default -- and the _asimov closure fit, so a
+    # local `run_pO_fits.sh --extract-only` on the downloaded tree reproduces
+    # the complete summary incl. the stat/syst split and the closure rows)
+    local B rfd sfx
     for B in lab fb; do
-      rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_$B.root"
-      if rexists "$rfd"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B"
-        run "$LX:$rfd" "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B/" || err=1
-      fi
+      for sfx in "" "_statonly" "_asimov"; do
+        rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_${B}${sfx}.root"
+        if rexists "$rfd"; then
+          mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B"
+          run "$LX:$rfd" "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B/" || err=1
+        fi
+      done
     done
   done
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"

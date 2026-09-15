@@ -1,5 +1,6 @@
 #include "CMS_lumi.C"
 #include "TH1.h"
+#include "TBox.h"
 #include "TCanvas.h"
 #include "TLegend.h"
 #include "TPad.h"
@@ -11,6 +12,8 @@
 #include "TString.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <vector>
 
 // Global plot style: thicken the frame (the box / "bezel" around every plot).
 // This runs once when the header is loaded, so it applies to ALL pads and
@@ -102,6 +105,18 @@ struct PlotStyle
     double pullSplit = 0.30;   // fraction of the canvas given to the pull pad
     double pullCanvasScale = 1.125; // canvas-height multiplier when pullPad is on
     double pullYRange = -1.0;  // fixed symmetric |pull| axis; <0 -> auto (max(3, 1.15*max|pull|))
+
+    // Systematic-uncertainty boxes (2026-09-15), used by MakeSystBoxes and by
+    // the SaveNiceGraph* variants that are handed a statistical-error graph.
+    // The box is the SYSTEMATIC alone (CMS convention), centred on the point;
+    // the error bar then shows the STATISTICAL error only.
+    double systBoxWidthFrac    = 0.55;      // half-width as a fraction of the point's x error
+    double systBoxHalfWidthAbs = 0.0;       // absolute half-width (x units) when the graph has no x errors
+    int    systBoxFillColor    = kGray + 1;
+    double systBoxFillAlpha    = 0.35;      // translucent, so the stat bar drawn on top stays visible
+    int    systBoxFillStyle    = 1001;      // 1001 solid (with alpha); 0 = hollow outline only
+    int    systBoxLineColor    = kGray + 3;
+    int    systBoxLineWidth    = 1;
 };
 
 // -----------------------------
@@ -283,6 +298,82 @@ static void ApplyGraphStyle(TGraphErrors *g, const PlotStyle &ps,
     g->GetYaxis()->SetTitleOffset(ps.yTitleOffset);
 }
 
+// -----------------------------------------------------------------------------
+// Statistical bar + systematic box (2026-09-15)
+// -----------------------------------------------------------------------------
+// The POI errors Combine reports are the TOTAL (profiled) ones: while a POI is
+// displaced every constrained nuisance is free to re-adjust, and that freedom
+// is part of the quoted width. The STATISTICAL part is the same post-fit
+// covariance CONDITIONED on those nuisances (fork extract_pO_simfit.C::
+// ComputeStatCov -> h_cov_yield[_FB]_stat + the rErr_stat CSV column) -- the
+// Gaussian-exact equivalent of refitting with them frozen at their post-fit
+// values. Given the two graphs
+//     gTot   the points with their TOTAL error        (what is measured)
+//     gStat  the SAME points with the STATISTICAL one
+// the systematic is
+//     syst_i = sqrt(tot_i^2 - stat_i^2),
+// real by construction: conditioning subtracts a positive semi-definite term
+// from the covariance, so stat <= tot for ANY linear combination of the fitted
+// yields -- including the derived observables (A_ch, R_FB, sigma).
+//
+// Returned boxes are drawn by the caller and then owned by the pad (same
+// convention as the TLine's the graph tuners create); they must stay alive
+// until the canvas is saved.
+static std::vector<TBox *> MakeSystBoxes(const TGraphErrors *gTot,
+                                         const TGraphErrors *gStat,
+                                         const PlotStyle &ps)
+{
+    std::vector<TBox *> boxes;
+    if (!gTot || !gStat)
+        return boxes;
+
+    const int n = gTot->GetN();
+    if (gStat->GetN() != n)
+    {
+        std::cerr << "[WARN] MakeSystBoxes: stat graph has " << gStat->GetN()
+                  << " points, total has " << n << " -> no systematic boxes\n";
+        return boxes;
+    }
+
+    for (int i = 0; i < n; ++i)
+    {
+        const double x = gTot->GetPointX(i), y = gTot->GetPointY(i);
+        const double et = gTot->GetErrorY(i), es = gStat->GetErrorY(i);
+        // stat <= tot holds exactly (the conditioning subtracts a PSD term),
+        // but a point whose systematic is genuinely ~0 can come out a few
+        // 1e-6 negative: the derived observables are near-cancelling
+        // combinations (R_FB's sigma^2 = vF/F^2 + vB/B^2 - 2cov/(FB)) of
+        // matrices built through a numerical inversion. Clip those silently
+        // and warn only on a real mismatch -- pairing the wrong two graphs
+        // shows up percent-level, not at 1e-6.
+        if (es > et * 1.001)
+            std::cerr << "[WARN] MakeSystBoxes: point " << i << " has stat " << es
+                      << " > total " << et << " -> are these the same observable?"
+                      << " (systematic clipped to 0)\n";
+        const double syst = std::sqrt(std::max(0.0, et * et - es * es));
+        if (syst <= 0.0)
+            continue;
+
+        // Half-width: a fraction of the point's own x error (= the bin
+        // half-width in the rapidity-binned plots), falling back to the
+        // absolute setting for graphs drawn at discrete x with no x errors
+        // (e.g. the three W+/W-/W points of xsec_fiducial_comb).
+        double hw = ps.systBoxWidthFrac * gTot->GetErrorX(i);
+        if (hw <= 0.0)
+            hw = ps.systBoxHalfWidthAbs;
+        if (hw <= 0.0)
+            continue;
+
+        TBox *b = new TBox(x - hw, y - syst, x + hw, y + syst);
+        b->SetFillColorAlpha(ps.systBoxFillColor, ps.systBoxFillAlpha);
+        b->SetFillStyle(ps.systBoxFillStyle);
+        b->SetLineColor(ps.systBoxLineColor);
+        b->SetLineWidth(ps.systBoxLineWidth);
+        boxes.push_back(b);
+    }
+    return boxes;
+}
+
 static void SaveNiceGraph(TGraphErrors *g,
                           const std::string &outPathNoExt,
                           const std::string &xTitle,
@@ -296,7 +387,13 @@ static void SaveNiceGraph(TGraphErrors *g,
                           TGraphErrors *g1 = nullptr,
                           TGraphErrors *g2 = nullptr,
                           TGraphErrors *g3 = nullptr,
-                          TGraphErrors *g4 = nullptr)
+                          TGraphErrors *g4 = nullptr,
+                          // Same points as g but carrying the STATISTICAL error
+                          // (2026-09-15). When given, the drawn error bars are
+                          // the statistical ones and the systematic -- the
+                          // quadratic difference from g's TOTAL error -- is
+                          // drawn as a TBox per point. See MakeSystBoxes.
+                          TGraphErrors *gStat = nullptr)
 {
     if (!g)
         return;
@@ -307,15 +404,22 @@ static void SaveNiceGraph(TGraphErrors *g,
     ApplyCanvasStyle(c, ps);
     c->cd();
 
-    ApplyGraphStyle(g, ps, xTitle, yTitle);
+    // With a stat graph it is gStat that carries the visible bars; g is then
+    // only the source of the box half-heights. The y-range is set by the tuner
+    // in every caller that uses this path, so which of the two establishes the
+    // frame does not change the axes.
+    TGraphErrors *gDraw = gStat ? gStat : g;
+    std::vector<TBox *> sboxes = MakeSystBoxes(g, gStat, ps);
 
-    g->Draw(ps.drawOptGraph.c_str());
+    ApplyGraphStyle(gDraw, ps, xTitle, yTitle);
+
+    gDraw->Draw(ps.drawOptGraph.c_str());
 
     DrawHeader(ps, mainTitle, subTitle1, subTitle2);
     DrawInfoBox(ps, boxLines);
 
     if (tuner)
-        tuner(c, g);
+        tuner(c, gDraw);
 
     CMS_lumi(c, 13, 10);
 
@@ -352,6 +456,22 @@ static void SaveNiceGraph(TGraphErrors *g,
         g4->SetMarkerColor(kPink);
         g4->Draw("P SAME");
     }
+
+    // systematic boxes under the data, then the stat bars + markers back on top
+    if (!sboxes.empty())
+    {
+        for (TBox *b : sboxes)
+            b->Draw();
+        gDraw->Draw("P SAME");
+
+        TLegend *legS = new TLegend(0.18, 0.15, 0.48, 0.26);
+        legS->SetBorderSize(0); legS->SetFillStyle(0);
+        legS->SetTextFont(ps.font); legS->SetTextSize(0.030);
+        legS->AddEntry(gDraw, "Data (bars: stat.)", "lep");
+        legS->AddEntry(sboxes[0], "syst. (fit nuisances)", "f");
+        legS->Draw();
+    }
+
     c->RedrawAxis(); // redraw frame + ticks on top
     c->Modified();
     c->Update();
@@ -375,7 +495,10 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
                                     TGraphErrors *g1 = nullptr,
                                     TGraphErrors *g2 = nullptr,
                                     TGraphErrors *g3 = nullptr,
-                                    TGraphErrors *g4 = nullptr)
+                                    TGraphErrors *g4 = nullptr,
+                                    // STATISTICAL-error twin of g (2026-09-15);
+                                    // see SaveNiceGraph / MakeSystBoxes.
+                                    TGraphErrors *gStat = nullptr)
 {
     if (!g)
         return;
@@ -386,19 +509,22 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
     ApplyCanvasStyle(c, ps);
     c->cd();
 
-    ApplyGraphStyle(g, ps, xTitle, yTitle);
+    TGraphErrors *gDraw = gStat ? gStat : g;
+    std::vector<TBox *> sboxes = MakeSystBoxes(g, gStat, ps);
 
-    g->SetMarkerStyle(20);
-    g->SetMarkerSize(1.2);
-    g->SetMarkerColor(kBlack);
-    g->SetLineColor(kBlack);
-    g->Draw(ps.drawOptGraph.c_str());
+    ApplyGraphStyle(gDraw, ps, xTitle, yTitle);
+
+    gDraw->SetMarkerStyle(20);
+    gDraw->SetMarkerSize(1.2);
+    gDraw->SetMarkerColor(kBlack);
+    gDraw->SetLineColor(kBlack);
+    gDraw->Draw(ps.drawOptGraph.c_str());
 
     DrawHeader(ps, mainTitle, subTitle1, subTitle2);
     DrawInfoBox(ps, boxLines);
 
     if (tuner)
-        tuner(c, g);
+        tuner(c, gDraw);
 
     CMS_lumi(c, 13, 10);
 
@@ -419,7 +545,12 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
         gm->Draw("3");       // filled band only
     }
 
-    g->Draw("P SAME"); // data points back on top of the bands
+    // Systematic boxes go ON TOP of the theory bands (translucent fills would
+    // otherwise tint them), with the stat bars + markers above everything.
+    for (TBox *b : sboxes)
+        b->Draw();
+
+    gDraw->Draw("P SAME"); // data points back on top of the bands
 
     // >>>>>>>>>>>>>>>> TEMPORARY: "Projection with Electrons" band >>>>>>>>>>>>>>>>
     // Overlays the data with shrunk error bars (errors/1.4 ~ errors/sqrt(2), i.e.
@@ -445,7 +576,9 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
     leg->SetFillStyle(0);
     leg->SetTextFont(42);
     leg->SetTextSize(0.033);
-    leg->AddEntry(g, "Data", "p");
+    leg->AddEntry(gDraw, sboxes.empty() ? "Data" : "Data (bars: stat.)", "p");
+    if (!sboxes.empty())
+        leg->AddEntry(sboxes[0], "syst. (fit nuisances)", "f");
     if (kShowProjection && g_stat2x) // TEMPORARY -- remove with the projection block above
         leg->AddEntry(g_stat2x, "Projection with Electrons", "l");
     for (int i = 0; i < 4; ++i)

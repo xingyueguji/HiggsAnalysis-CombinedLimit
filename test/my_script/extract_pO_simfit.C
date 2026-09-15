@@ -34,6 +34,28 @@
 //     alphaS) -- their pulls AND post-fit constraints go to comb_summary.csv
 //     (<name>_theta rows: value = pull, error = constraint; error < 1 means the
 //     data constrained that shape) and they join the Asimov closure (theta = 0).
+// STAT COMPONENT -- the 19th CSV column rErr_stat, the comb_summary.csv rows
+//   simfit_<B>_stat and the matrices h_cov_yield[_FB]_stat +
+//   h_cov_poi[_FB]_stat. rErr / h_cov_yield / h_cov_poi stay the TOTAL
+//   (profiled) errors, so downstream syst = sqrt(total^2 - stat^2).
+//   SOURCE, user decision 2026-09-15b: the --statonly COMPANION FIT
+//   (fitDiagnostics_simfit_<B>_statonly.root -- every constrained nuisance
+//   frozen at its POST-FIT value, the Combine breakdown recipe run
+//   numerically), now produced by default. When it is absent the extraction
+//   falls back to the CONDITIONED covariance of fit_s (ComputeStatCov below:
+//   the Schur complement = the Gaussian-exact equivalent of that refit,
+//   without the refit), and the conditioning is always computed anyway as the
+//   CROSS-CHECK -- the two agreeing says the likelihood is parabolic in the
+//   POI directions. One line reports which source was used; everything reads
+//   through the statErr/statCov lambdas, so the choice is made in one place.
+//   NB the conditioning guarantees stat <= total (a PSD term is subtracted); a
+//   separate refit does NOT, so POIs with stat > total are counted and warned
+//   about rather than silently floored by a downstream max(0, .).
+// PREFIT-S CHECK (2026-09-15): the prefit signal integrals S are read from the
+//   two W input files and, when the nominal fit carries shapes_prefit
+//   (--saveShapes), compared per region with the sum of the fitted channels'
+//   prefit signal shapes -- a WARN means the input files are NOT the ones that
+//   were fitted (e.g. --extract-only on regenerated inputs).
 // Nuisance thetas (pulls) are also dumped to comb_summary.csv (<name>_theta
 // rows) -- THE check that the ABCD prediction and its assigned uncertainty are
 // consistent with the data (|pull| ~> 1 means kappa too small or template biased).
@@ -74,9 +96,14 @@
 #include "RooArgList.h"
 #include "TObjArray.h"
 #include "TObjString.h"
+#include "TMatrixD.h"
+#include "TMatrixDSym.h"
+#include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <map>
 #include <vector>
 
 namespace {
@@ -150,6 +177,83 @@ RooFitResult *OpenFitS(const TString &path, TFile *&f) {
   return (RooFitResult *)f->Get("fit_s");
 }
 
+// ---- STATISTICAL component of the post-fit covariance, from fit_s ALONE ------
+// (2026-09-15.) The error Minuit reports for a POI is the TOTAL (profiled) one:
+// every nuisance is free to move while the POI is displaced. Its statistical
+// part is the error the same POI would have with every CONSTRAINED nuisance
+// held fixed at its post-fit value -- and that number is already contained in
+// the nominal fit's covariance matrix. With V = the full Hesse covariance over
+// all floating parameters, split into the STATISTICAL block k (the POIs and the
+// unconstrained rateParams: r_*, qcd_s*, qcd_norm* -- data-driven quantities,
+// e.g. the in-fit ABCD scales) and the nuisance block n (everything else), the
+// covariance of k with n FIXED is the Schur complement
+//     V_stat = V_kk - V_kn V_nn^{-1} V_nk      ( = (H_kk)^{-1},  H = V^{-1} ),
+// i.e. exactly what a refit with `--freezeParameters allConstrainedNuisances`
+// at the post-fit values returns in the Gaussian (Hesse) approximation -- the
+// Combine "breakdown" recipe -- without the refit. Checked on the 2026-09-14
+// fit: the two formulas agree to 1e-16 and sqrt(V_ii) reproduces every quoted
+// error to 2e-4 (the errors ARE the Hesse diagonal). The subtracted term is
+// positive semi-definite, so stat <= total per parameter by construction and
+// syst = sqrt(total^2 - stat^2) is always real. The classification is BY NAME
+// (the same rule as run_pO_fits.sh's frozen-refit one-liner) and is printed, so
+// a new unconstrained parameter under another name is visible as
+// "conditioned out" instead of silently shrinking the stat errors.
+bool IsStatParam(const TString &n) {
+  return n.BeginsWith("r_") || n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm");
+}
+
+struct StatCov {
+  bool ok = false;
+  std::vector<TString> kept, nuis; // statistical parameters / conditioned-out nuisances
+  std::map<TString, int> idx;      // kept name -> row of V
+  TMatrixD V;                      // kept x kept statistical covariance
+  double err(const TString &n) const {
+    std::map<TString, int>::const_iterator it = idx.find(n);
+    return (it == idx.end()) ? -1.0 : std::sqrt(std::max(0.0, V(it->second, it->second)));
+  }
+  double cov(const TString &a, const TString &b) const {
+    std::map<TString, int>::const_iterator ia = idx.find(a), ib = idx.find(b);
+    return (ia == idx.end() || ib == idx.end()) ? 0.0 : V(ia->second, ib->second);
+  }
+};
+
+StatCov ComputeStatCov(const RooFitResult *fr) {
+  StatCov sc;
+  if (!fr) return sc;
+  const RooArgList &pars = fr->floatParsFinal();
+  const int n = pars.getSize();
+  const TMatrixDSym &Vall = fr->covarianceMatrix(); // ordered like floatParsFinal
+  if (n == 0 || Vall.GetNrows() != n) return sc;
+  std::vector<int> ik, in;
+  for (int i = 0; i < n; ++i) {
+    const TString nm = pars.at(i)->GetName();
+    if (IsStatParam(nm)) { ik.push_back(i); sc.kept.push_back(nm); }
+    else                 { in.push_back(i); sc.nuis.push_back(nm); }
+  }
+  const int nk = (int)ik.size(), nn = (int)in.size();
+  if (nk == 0) return sc;
+  TMatrixD Vkk(nk, nk);
+  for (int a = 0; a < nk; ++a)
+    for (int b = 0; b < nk; ++b) Vkk(a, b) = Vall(ik[a], ik[b]);
+  if (nn > 0) {
+    TMatrixD Vkn(nk, nn), Vnn(nn, nn);
+    for (int a = 0; a < nk; ++a)
+      for (int c = 0; c < nn; ++c) Vkn(a, c) = Vall(ik[a], in[c]);
+    for (int c = 0; c < nn; ++c)
+      for (int d = 0; d < nn; ++d) Vnn(c, d) = Vall(in[c], in[d]);
+    double det = 0.0;
+    Vnn.Invert(&det);
+    if (det == 0.0 || !std::isfinite(det)) return sc; // singular nuisance block: give up
+    const TMatrixD Vnk(TMatrixD::kTransposed, Vkn);
+    Vkk -= Vkn * Vnn * Vnk;
+  }
+  sc.V.ResizeTo(nk, nk);
+  sc.V = Vkk;
+  for (int a = 0; a < nk; ++a) sc.idx[sc.kept[a]] = a;
+  sc.ok = true;
+  return sc;
+}
+
 } // namespace
 
 void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, simfit_fb/)
@@ -206,10 +310,14 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     fy->WriteTObject(h, name, "Overwrite");
   };
 
+  // 19th column rErr_stat (2026-09-14/15): the STATISTICAL component of the POI
+  // error, from the nominal fit's covariance conditioned on the constrained
+  // nuisances (ComputeStatCov); -1 only when fit_s carries no usable covariance.
+  // rErr stays the TOTAL (profiled) error; syst = sqrt(rErr^2 - rErr_stat^2).
   std::ofstream csv(TString::Format("%s/comb_W_yields.csv", outDir).Data());
   csv << "region,charge,binning,ybin,r,rErr,signal_prefit,fitted_yield,fitted_yield_err,"
          "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr,lumi,lumiErr,"
-         "qcd_model\n";
+         "qcd_model,rErr_stat\n";
 
   std::ofstream scsv(TString::Format("%s/comb_summary.csv", outDir).Data());
   scsv << "fit,param,value,error,signal_prefit,fitted_yield,fitted_yield_err\n";
@@ -233,6 +341,78 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     std::cout << "[extract-simfit] " << fitName << ": status " << fr->status()
               << ", covQual " << fr->covQual()
               << ", r_Z = " << Form("%.4f +/- %.4f", rz.v, rz.e) << "\n";
+    // the STATISTICAL component of every POI error, from fit_s alone (2026-09-15):
+    // the full post-fit covariance conditioned on the constrained nuisances
+    const StatCov sc = ComputeStatCov(fr);
+    if (sc.ok) {
+      std::cout << "[extract-simfit] " << fitName << ": stat component from the fit covariance: "
+                << sc.kept.size() << " statistical parameters kept (POIs + unconstrained rateParams), "
+                << sc.nuis.size() << " constrained nuisances conditioned out:";
+      for (size_t i = 0; i < sc.nuis.size(); ++i) std::cout << " " << sc.nuis[i];
+      std::cout << "\n";
+    } else
+      std::cout << "[extract-simfit] WARN " << fitName
+                << ": no usable covariance matrix in fit_s -> conditioned stat component unavailable\n";
+    // the frozen-nuisance companion fit (run_pO_fits.sh --statonly, ON by
+    // default since 2026-09-15b): every CONSTRAINED nuisance frozen at its
+    // POST-FIT value, so the POI errors that come back ARE the statistical
+    // component -- the Combine breakdown recipe, run numerically.
+    TFile *fds = nullptr;
+    RooFitResult *frs = OpenFitS(TString::Format("%s/%s/fitDiagnostics_%s_statonly.root",
+                                                 fitsDir, fitName.Data(), fitName.Data()), fds);
+    if (frs) {
+      Par rzs = GetPar(frs, "r_Z");
+      std::cout << "[extract-simfit] " << fitName << "_statonlyfit: status " << frs->status()
+                << ", covQual " << frs->covQual()
+                << ", r_Z = " << Form("%.4f +/- %.4f vs %.4f conditioned", rzs.v, rzs.e, sc.err("r_Z")) << "\n";
+      if (frs->status() != 0 || frs->covQual() < 3)
+        std::cout << "[extract-simfit] WARN " << fitName << "_statonlyfit quality flags -- inspect fit_statonly.log\n";
+      scsv << fitName << "_statonlyfit,r_Z," << rzs.v << "," << rzs.e << ",,,\n";
+      scsv << fitName << "_statonlyfit,fit_status," << frs->status() << "," << frs->covQual() << ",,,\n";
+    }
+
+    // ---- WHICH source the STATISTICAL component comes from -------------------
+    // USER DECISION 2026-09-15b: the --statonly companion FIT is the primary
+    // source; syst = sqrt(total^2 - stat^2) downstream. The conditioned
+    // covariance (ComputeStatCov, the Schur complement of fit_s) is the exact
+    // Gaussian answer and needs no refit, so it stays as the FALLBACK when the
+    // companion is absent AND as the cross-check printed below -- the two
+    // agreeing is the statement that the likelihood is parabolic in the POI
+    // directions. Everything downstream (rErr_stat, h_cov_yield[_FB]_stat,
+    // h_cov_poi[_FB]_stat, the simfit_<B>_stat rows and the inclusive sums)
+    // reads ONLY through statErr/statCov, so the choice is made in one place.
+    //
+    // NB unlike the conditioning, a separate refit does NOT guarantee
+    // stat <= total (different minimizer path, non-parabolic directions), so
+    // every consumer of syst = sqrt(total^2 - stat^2) must clamp -- and the
+    // violations are counted and reported here rather than silently floored.
+    const bool statFromFit = (frs != nullptr);
+    auto statAvail = [&]() { return statFromFit || sc.ok; };
+    auto statErr = [&](const TString &n) -> double {
+      if (statFromFit) { Par p = GetPar(frs, n); return p.ok ? p.e : -1.0; }
+      return sc.ok ? sc.err(n) : -1.0;
+    };
+    auto statCov = [&](const TString &a, const TString &b) -> double {
+      if (statFromFit) {
+        Par pa = GetPar(frs, a), pb = GetPar(frs, b);
+        if (!pa.ok || !pb.ok) return 0.0;
+        return ((a == b) ? 1.0 : frs->correlation(a.Data(), b.Data())) * pa.e * pb.e;
+      }
+      return sc.ok ? sc.cov(a, b) : 0.0;
+    };
+    std::cout << "[extract-simfit] " << fitName << ": STAT component from "
+              << (statFromFit ? "the --statonly companion FIT (frozen nuisances)"
+                              : (sc.ok ? "the CONDITIONED covariance (no companion fit found)"
+                                       : "NOTHING -- no companion fit and no usable covariance"))
+              << "\n";
+    if (statAvail()) {
+      const double ezs = statErr("r_Z");
+      std::cout << "[extract-simfit] " << fitName << ": r_Z = "
+                << Form("%.4f +/- %.4f total, +/- %.4f stat -> syst %.4f", rz.v, rz.e, ezs,
+                        std::sqrt(std::max(0.0, rz.e * rz.e - ezs * ezs)))
+                << "\n";
+      scsv << fitName << "_stat,r_Z," << rz.v << "," << ezs << ",,,\n";
+    }
     if (fr->status() != 0 || fr->covQual() < 3)
       std::cout << "[extract-simfit] WARN " << fitName
                 << " quality flags (status!=0 or covQual<3) -- inspect fit.log\n";
@@ -341,20 +521,53 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
 
     // ---- POIs + prefit integrals, fixed order [Wp_y0..11, Wm_y0..11] --------
     std::vector<TString> pois, regs;
-    std::vector<double> rv(NPOI, 0), re(NPOI, 0), S(NPOI, 0);
-    std::vector<bool> ok(NPOI, false);
-    double rmin = 1e30, rmax = -1e30;
+    std::vector<double> rv(NPOI, 0), re(NPOI, 0), S(NPOI, 0), res(NPOI, -1.0);
+    std::vector<double> rvf(NPOI, 0), ref(NPOI, -1.0); // the companion fit's r / rErr
+    std::vector<double> rec(NPOI, -1.0);               // the CONDITIONED stat error (cross-check)
+    std::vector<bool> ok(NPOI, false), okf(NPOI, false);
+    double rmin = 1e30, rmax = -1e30, maxDr = 0.0, maxDe = 0.0, maxDS = 0.0;
+    int nStatGtTot = 0; double worstStatGtTot = 0.0; TString worstStatPoi;
+    const char *flavs[2] = {"mu", "ele"};
     for (int ic = 0; ic < 2; ++ic)
       for (int iy = 0; iy < NB; ++iy) {
         const int k = ic * NB + iy;
         pois.push_back(TString::Format("r_%s_y%d", charges[ic], iy));
         regs.push_back(TString::Format("%s_%s_y%d", charges[ic], B, iy));
         Par p = GetPar(fr, pois[k]);
+        if (p.ok && statAvail()) res[k] = statErr(pois[k]); // THE stat component (source chosen above)
+        if (sc.ok && p.ok) rec[k] = sc.err(pois[k]);        // conditioned value, for the cross-check
+        if (frs) { // the companion fit's own r (same minimum expected)
+          Par ps = GetPar(frs, pois[k]);
+          if (ps.ok) {
+            okf[k] = true; ref[k] = ps.e; rvf[k] = ps.v;
+            if (p.ok) maxDr = std::max(maxDr, std::fabs(ps.v - p.v));
+            if (rec[k] > 0) maxDe = std::max(maxDe, std::fabs(ps.e / rec[k] - 1.0));
+          }
+        }
+        // syst = sqrt(total^2 - stat^2) needs stat <= total; the conditioning
+        // guarantees it, a separate refit does not -- count and report instead
+        // of letting a downstream max(0, .) hide it
+        if (p.ok && res[k] > 0 && res[k] > p.e) {
+          ++nStatGtTot;
+          const double rel = res[k] / p.e - 1.0;
+          if (rel > worstStatGtTot) { worstStatGtTot = rel; worstStatPoi = pois[k]; }
+        }
         const double smu = sigPrefit(wmu, regs[k]), sel = sigPrefit(wel, regs[k]);
         if (smu < 0 || sel < 0)
           std::cerr << "[extract-simfit] WARN missing prefit signal for " << regs[k] << "\n";
         S[k]  = (smu > 0 ? smu : 0) + (sel > 0 ? sel : 0);
         ok[k] = p.ok && S[k] > 0;
+        // prefit-S check against the fitted channels' saved prefit signal shapes
+        // (shapes_prefit/<F>_<C>_<B>_y<i>/signal, present with --saveShapes): the
+        // input files must be the ones that were fitted
+        {
+          double sfit = 0; int nf = 0;
+          for (int jf = 0; jf < 2; ++jf) {
+            TH1 *hp = (TH1 *)fd->Get(TString::Format("shapes_prefit/%s_%s_%s_y%d/signal", flavs[jf], charges[ic], B, iy));
+            if (hp) { sfit += hp->Integral(); ++nf; }
+          }
+          if (nf == 2 && S[k] > 0) maxDS = std::max(maxDS, std::fabs(sfit / S[k] - 1.0));
+        }
         rv[k] = p.v; re[k] = p.e;
         if (!p.ok) {
           std::cerr << "[extract-simfit] WARN POI " << pois[k] << " not in fit_s\n";
@@ -388,12 +601,49 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
             << rv[k] << "," << re[k] << "," << S[k] << "," << y << "," << e << ","
             << qmu.v << "," << qmu.e << "," << qel.v << "," << qel.e << ","
             << rz.v << "," << rz.e << "," << lum.v << "," << lum.e << ","
-            << qModel << "\n";
+            << qModel << "," << res[k] << "\n";
         scsv << fitName << "," << pois[k] << "," << rv[k] << "," << re[k] << ","
              << S[k] << "," << y << "," << e << "\n";
+        if (ok[k] && res[k] >= 0) // stat component: same r, stat error (source above)
+          scsv << fitName << "_stat," << pois[k] << "," << rv[k] << "," << res[k] << ","
+               << S[k] << "," << y << "," << res[k] * S[k] << "\n";
+        if (okf[k])
+          scsv << fitName << "_statonlyfit," << pois[k] << "," << rvf[k] << "," << ref[k] << ","
+               << S[k] << "," << rvf[k] * S[k] << "," << ref[k] * S[k] << "\n";
       }
     std::cout << "[extract-simfit] " << fitName << ": 24 x r in ["
               << Form("%.3f, %.3f", rmin, rmax) << "]\n";
+    if (maxDS > 1e-5)
+      std::cout << "[extract-simfit] WARN " << fitName << ": prefit signal integrals of the input files differ from the"
+                << " fitted channels' shapes_prefit by up to " << Form("%.2e", maxDS)
+                << " (relative) -- are these the inputs that were fitted?\n";
+    if (statAvail()) {
+      // typical stat/total error ratio of the 24 POIs (the rest is the profiled
+      // systematics: QCD lnN, lumi, the theory shapes, the lepton SFs)
+      double sumRatio = 0; int nRatio = 0;
+      for (int k = 0; k < NPOI; ++k) if (ok[k] && res[k] > 0 && re[k] > 0) { sumRatio += res[k] / re[k]; ++nRatio; }
+      std::cout << "[extract-simfit] " << fitName << ": mean rErr_stat / rErr over the 24 POIs = "
+                << Form("%.3f", nRatio ? sumRatio / nRatio : 0.0) << "\n";
+    }
+    if (nStatGtTot > 0)
+      std::cout << "[extract-simfit] WARN " << fitName << ": " << nStatGtTot
+                << " POI(s) with stat > total (worst " << worstStatPoi << " by "
+                << Form("%+.2f%%", 100 * worstStatGtTot)
+                << ") -- syst = sqrt(total^2 - stat^2) is floored at 0 there."
+                << " The conditioning cannot do this; a separate refit can, so it points at a"
+                << " non-parabolic direction or a minimizer difference. Inspect fit_statonly.log.\n";
+    if (frs) {
+      // the companion must sit at the same minimum (nuisances frozen at their
+      // post-fit values) and, in the Gaussian approximation both share, return
+      // the conditioned errors: report the largest deviation of each. Since
+      // 2026-09-15b the companion IS the quoted stat error, so this is the
+      // check that the conditioned (refit-free) answer agrees with it.
+      std::cout << "[extract-simfit] " << fitName << "_statonlyfit vs conditioned covariance: max |r_fit - r| = "
+                << Form("%.4f", maxDr)
+                << (maxDr > 0.01 ? "  WARN (> 0.01: nuisances not frozen at the post-fit values?)" : "")
+                << ", max |rErr_fit / rErr_conditioned - 1| = " << Form("%.4f", maxDe)
+                << (maxDe > 0.02 ? "  WARN (> 2%: non-Gaussian likelihood or a mis-classified parameter)" : "") << "\n";
+    }
     scsv << fitName << ",r_Z," << rz.v << "," << rz.e << ",,,\n";
     scsv << fitName << ",fit_status," << fr->status() << "," << fr->covQual() << ",,,\n";
 
@@ -418,27 +668,127 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     hcov->SetDirectory(fy);
     fy->WriteTObject(hcov, covName, "Overwrite");
 
+    // the STATISTICAL part of the same matrix (2026-09-15): h_cov_yield_stat /
+    // h_cov_yield_FB_stat = S_a S_b cov_stat(r_a, r_b) from the conditioned
+    // covariance -- the inner error bars of xsec_fiducial_comb (and any
+    // downstream stat/syst split)
+    if (statAvail()) {
+      const TString covNameS = TString(covName) + "_stat";
+      TH2D *hcovs = new TH2D(covNameS, Form("%s (fitted-yield covariance, stat component: constrained nuisances conditioned out);index;index", covNameS.Data()),
+                             NPOI, 0, NPOI, NPOI, 0, NPOI);
+      for (int a = 0; a < NPOI; ++a) {
+        TString lab = pois[a]; lab.ReplaceAll("r_", "");
+        hcovs->GetXaxis()->SetBinLabel(a + 1, lab.Data());
+        hcovs->GetYaxis()->SetBinLabel(a + 1, lab.Data());
+      }
+      for (int a = 0; a < NPOI; ++a)
+        for (int b = 0; b < NPOI; ++b) {
+          if (!ok[a] || !ok[b]) continue;
+          hcovs->SetBinContent(a + 1, b + 1, S[a] * S[b] * statCov(pois[a], pois[b]));
+        }
+      hcovs->SetDirectory(fy);
+      fy->WriteTObject(hcovs, covNameS, "Overwrite");
+    }
+
+    // ---- 25x25 POI covariance INCLUDING r_Z (2026-09-15) --------------------
+    // h_cov_poi[_FB][_stat]: cov(p_a, p_b) in PARAMETER space (not yield
+    // space), order [r_Wp_y0..11, r_Wm_y0..11, r_Z], axis labels = the POI
+    // names. h_cov_yield deliberately covers the 24 W POIs only, so the
+    // sigma_W <-> sigma_Z cross term had no home; this matrix is what the
+    // (sigma_W, sigma_Z) covariance ellipse needs -- sigma_W = Sum_i r_i
+    // sigma_gen,i and sigma_Z = r_Z sigma_gen,Z are both LINEAR in these
+    // parameters, so their 2x2 covariance is J V J^T with J the gen sigmas.
+    // Written unconditionally (it needs no prefit template integrals, unlike
+    // the yield matrix), so it is also the cleaner input for any future r
+    // propagation.
+    {
+      std::vector<TString> pn(pois.begin(), pois.begin() + NPOI);
+      pn.push_back("r_Z");
+      const int NP = NPOI + 1;
+      std::vector<double> pe(NP, 0);
+      std::vector<bool> pok(NP, false);
+      for (int a = 0; a < NPOI; ++a) { pe[a] = re[a]; pok[a] = ok[a]; }
+      pe[NPOI] = rz.e; pok[NPOI] = rz.ok;
+      const char *pcName = (ib == 0) ? "h_cov_poi" : "h_cov_poi_FB";
+      for (int pass = 0; pass < 2; ++pass) {         // 0 = total, 1 = stat
+        if (pass == 1 && !statAvail()) continue;
+        const TString nm = TString(pcName) + (pass ? "_stat" : "");
+        TH2D *hp = new TH2D(nm, Form("%s (POI covariance%s);;", nm.Data(),
+                                     pass ? ", stat component: constrained nuisances conditioned out" : ""),
+                            NP, 0, NP, NP, 0, NP);
+        for (int a = 0; a < NP; ++a) {
+          hp->GetXaxis()->SetBinLabel(a + 1, pn[a].Data());
+          hp->GetYaxis()->SetBinLabel(a + 1, pn[a].Data());
+        }
+        for (int a = 0; a < NP; ++a)
+          for (int b = 0; b < NP; ++b) {
+            if (!pok[a] || !pok[b]) continue;
+            const double v = pass ? statCov(pn[a], pn[b])
+                                  : ((a == b) ? 1.0 : fr->correlation(pn[a].Data(), pn[b].Data())) * pe[a] * pe[b];
+            hp->SetBinContent(a + 1, b + 1, v);
+          }
+        hp->SetDirectory(fy);
+        fy->WriteTObject(hp, nm, "Overwrite");
+      }
+      if (rz.ok && ok[0])
+        std::cout << "[extract-simfit] " << fitName << ": wrote " << pcName
+                  << " (" << NP << "x" << NP << ", r_Z included); corr(r_Wp_y0, r_Z) = "
+                  << Form("%+.3f", fr->correlation("r_Wp_y0", "r_Z")) << "\n";
+    }
+
     // ---- covariance-propagated inclusive sums (diagnostics / AN numbers) ----
-    auto sumWithCov = [&](int lo, int hi, double &val, double &err) { // [lo,hi)
+    // (total from the nominal fit's correlation matrix; stat from the
+    // conditioned covariance; the companion fit's own numbers as the cross-check)
+    auto sumWithCov = [&](const std::function<double(int, int)> &covr, const std::vector<double> &rr,
+                          const std::vector<bool> &kk, int lo, int hi, double &val, double &err) { // [lo,hi)
       val = 0; double var = 0;
       for (int a = lo; a < hi; ++a) {
-        if (!ok[a]) continue;
-        val += rv[a] * S[a];
+        if (!kk[a]) continue;
+        val += rr[a] * S[a];
         for (int b = lo; b < hi; ++b) {
-          if (!ok[b]) continue;
-          const double rho = (a == b) ? 1.0 : fr->correlation(pois[a].Data(), pois[b].Data());
-          var += S[a] * S[b] * rho * re[a] * re[b];
+          if (!kk[b]) continue;
+          var += S[a] * S[b] * covr(a, b);
         }
       }
       err = (var > 0) ? std::sqrt(var) : 0.0;
     };
+    auto covTot = [&](int a, int b) {
+      return ((a == b) ? 1.0 : fr->correlation(pois[a].Data(), pois[b].Data())) * re[a] * re[b];
+    };
     double vWp, eWp, vWm, eWm, vW, eW;
-    sumWithCov(0, NB, vWp, eWp);
-    sumWithCov(NB, NPOI, vWm, eWm);
-    sumWithCov(0, NPOI, vW, eW);
+    sumWithCov(covTot, rv, ok, 0, NB, vWp, eWp);
+    sumWithCov(covTot, rv, ok, NB, NPOI, vWm, eWm);
+    sumWithCov(covTot, rv, ok, 0, NPOI, vW, eW);
     scsv << fitName << ",Wp_sum_yield," << vWp << "," << eWp << ",,,\n";
     scsv << fitName << ",Wm_sum_yield," << vWm << "," << eWm << ",,,\n";
     scsv << fitName << ",W_sum_yield,"  << vW  << "," << eW  << ",,,\n";
+    if (statAvail()) {
+      auto covStat = [&](int a, int b) { return statCov(pois[a], pois[b]); };
+      double vWps, eWps, vWms, eWms, vWs, eWs;
+      sumWithCov(covStat, rv, ok, 0, NB, vWps, eWps);
+      sumWithCov(covStat, rv, ok, NB, NPOI, vWms, eWms);
+      sumWithCov(covStat, rv, ok, 0, NPOI, vWs, eWs);
+      scsv << fitName << "_stat,Wp_sum_yield," << vWps << "," << eWps << ",,,\n";
+      scsv << fitName << "_stat,Wm_sum_yield," << vWms << "," << eWms << ",,,\n";
+      scsv << fitName << "_stat,W_sum_yield,"  << vWs  << "," << eWs  << ",,,\n";
+      std::cout << "[extract-simfit] " << fitName << ": W sum yield "
+                << Form("%.1f +/- %.1f total, +/- %.1f stat -> syst %.1f", vW, eW, eWs,
+                        std::sqrt(std::max(0.0, eW * eW - eWs * eWs))) << "\n";
+    }
+    if (frs) {
+      auto covFit = [&](int a, int b) {
+        return ((a == b) ? 1.0 : frs->correlation(pois[a].Data(), pois[b].Data())) * ref[a] * ref[b];
+      };
+      double vWpf, eWpf, vWmf, eWmf, vWf, eWf;
+      sumWithCov(covFit, rvf, okf, 0, NB, vWpf, eWpf);
+      sumWithCov(covFit, rvf, okf, NB, NPOI, vWmf, eWmf);
+      sumWithCov(covFit, rvf, okf, 0, NPOI, vWf, eWf);
+      scsv << fitName << "_statonlyfit,Wp_sum_yield," << vWpf << "," << eWpf << ",,,\n";
+      scsv << fitName << "_statonlyfit,Wm_sum_yield," << vWmf << "," << eWmf << ",,,\n";
+      scsv << fitName << "_statonlyfit,W_sum_yield,"  << vWf  << "," << eWf  << ",,,\n";
+    }
+
+    if (fds) { fds->Close(); delete fds; fds = nullptr; }
 
     // ---- Asimov closure (present only when run with --asimov) ---------------
     TFile *fda = nullptr;
