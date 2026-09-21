@@ -300,7 +300,8 @@ run_channel() {
 
   # ---- extract machine-readable yields + analysis histos ----
   if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_yields.C(\"$chan\",\"$FITS\",\"$ABS_W\",\"$ABS_Z\",\"$SUMM\")" 2>&1 | grep -E "\[extract\]|WARN" || true
+    root -b -q "$MYS/extract_pO_yields.C(\"$chan\",\"$FITS\",\"$ABS_W\",\"$ABS_Z\",\"$SUMM\")" 2>&1 \
+      | tee "$SUMM/extract_${chan}.log" | grep -E "\[extract\]|WARN" || true
   fi
 
   # ---- postfit plots ----
@@ -431,6 +432,41 @@ fit_contour() {  # $1 = lab | fb
             -n "_contour_${B}" --cminDefaultMinimizerStrategy 0 >fit_grid.log 2>&1 \
       || { echo "  [FAIL grid] contour_$B (see $RD/fit_grid.log)"; exit 1; }
     echo "  [contour_$B] grid: $CONTOUR_POINTS points over $RNG"
+
+    # ---- the STAT-ONLY profiled contour (2026-09-15c, user request) ----------
+    # Same scan with every CONSTRAINED nuisance frozen at its POST-FIT value --
+    # the identical recipe the --statonly companion fit uses, so this is the
+    # profiled twin of the dashed Gaussian stat-only ellipse. The post-fit
+    # values come from the NOMINAL fit (the nuisances are named the same in
+    # both workspaces; only the POI parametrization differs), and the
+    # unconstrained rateParams (qcd_s*) keep floating -- they are statistics.
+    # Its own +-4 sigma window: the stat region is ~3x smaller per axis, so
+    # re-using the total window would spend most of the grid outside it.
+    SND="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
+    if [ -f "$SND" ]; then
+      SETNUIS=$(root -l -b -q -e 'TFile f("'"$SND"'"); auto fr = (RooFitResult*)f.Get("fit_s"); TString s; if (fr) for (auto p : fr->floatParsFinal()) { TString n = p->GetName(); if (n.BeginsWith("r_") || n.BeginsWith("a_") || n == "sigmaW" || n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm")) continue; s += TString::Format("%s%s=%.10g", s.Length() ? "," : "", n.Data(), ((RooRealVar*)p)->getVal()); } printf("SETNUIS %s\n", s.Data());' 2>/dev/null | awk '$1=="SETNUIS"{print $2}')
+      if [ -n "$SETNUIS" ]; then SETOPT=(--setParameters "$SETNUIS"); else SETOPT=();
+        echo "  [contour_$B] WARN could not read the post-fit nuisance values -> frozen at their nominal values"; fi
+      combine -M MultiDimFit workspace_sigma.root --algo singles \
+              -P sigmaW -P r_Z --floatOtherPOIs 1 --saveFitResult \
+              --freezeParameters allConstrainedNuisances "${SETOPT[@]}" \
+              -n "_contourstatfit_${B}" --cminDefaultMinimizerStrategy 0 >fit_singles_stat.log 2>&1 \
+        || { echo "  [FAIL singles-stat] contour_$B (see $RD/fit_singles_stat.log)"; exit 1; }
+      RNGS=$(root -l -b -q -e 'TFile f("multidimfit_contourstatfit_'"$B"'.root"); auto fr = (RooFitResult*)f.Get("fit_mdf"); if (fr) { auto *s = (RooRealVar*)fr->floatParsFinal().find("sigmaW"); auto *z = (RooRealVar*)fr->floatParsFinal().find("r_Z"); if (s && z) printf("RNG sigmaW=%.6g,%.6g:r_Z=%.6g,%.6g\n", s->getVal()-4*s->getError()>0 ? s->getVal()-4*s->getError() : 0.0, s->getVal()+4*s->getError(), z->getVal()-4*z->getError()>0 ? z->getVal()-4*z->getError() : 0.0, z->getVal()+4*z->getError()); }' 2>/dev/null | awk '$1=="RNG"{print $2}')
+      if [ -z "$RNGS" ]; then
+        echo "  [contour_$B] WARN no stat-only range -> stat contour skipped"
+      else
+        combine -M MultiDimFit workspace_sigma.root --algo grid --points "$CONTOUR_POINTS" \
+                -P sigmaW -P r_Z --floatOtherPOIs 1 --saveNLL \
+                --setParameterRanges "$RNGS" \
+                --freezeParameters allConstrainedNuisances "${SETOPT[@]}" \
+                -n "_contourstat_${B}" --cminDefaultMinimizerStrategy 0 >fit_grid_stat.log 2>&1 \
+          || { echo "  [FAIL grid-stat] contour_$B (see $RD/fit_grid_stat.log)"; exit 1; }
+        echo "  [contour_$B] stat-only grid: $CONTOUR_POINTS points over $RNGS"
+      fi
+    else
+      echo "  [contour_$B] WARN $SND absent -> stat-only contour skipped"
+    fi
   ) && echo "  [ok] contour_$B"
 }
 
@@ -454,8 +490,16 @@ simfit_extract() {  # POIs + mu+e-combined yields + covariance -> $SSUMM (root o
     echo "[extract] WARN no sidecar $KF -- legacy (free-rateParam) extraction assumed"
   fi
   if command -v root >/dev/null 2>&1; then
+    # tee the FULL extraction output into summary/ (2026-09-15c): the stat-source
+    # line, the statonly-vs-conditioned cross-check, the Asimov closure and every
+    # WARN are printed, not stored in the CSVs -- and the fit runs on lxplus, so
+    # without this they only ever exist in that terminal. summary/ is downloaded
+    # wholesale, so the log travels with the results. (Repo convention: if a stage
+    # produces numbers anyone quotes, it gets a log.)
     root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\")" 2>&1 \
+      | tee "$SSUMM/extract_simfit.log" \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
+    echo "[extract] full log: $SSUMM/extract_simfit.log"
   fi
 }
 

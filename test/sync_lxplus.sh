@@ -10,9 +10,20 @@
 #                                     # (4 required MET/Z + up to 4 optional
 #                                     #  lepton-pT variant W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
-#   ./sync_lxplus.sh download         # pull summary/ (fitted yields + CSVs) AND
-#                                     # datacards/ (cards+maps+sidecar as ACTUALLY fitted),
-#                                     # all out-trees present (pO_fit_out[_leppt[_mt40]])
+#   ./sync_lxplus.sh download         # pull, for every out-tree present
+#                                     # (pO_fit_out[_leppt[_mt40]]):
+#                                     #   summary/   fitted yields + CSVs
+#                                     #   datacards/ cards + t2w maps (incl. the
+#                                     #              _sigma contour maps) + the
+#                                     #              kappa sidecar, AS FITTED
+#                                     #   impacts/ cov/ contour/   (minus wd_* and
+#                                     #              workspace_sigma.root)
+#                                     #   fits/fitDiagnostics_simfit_<B>{,_statonly,_asimov}.root
+#                                     #              + the per-variant *.log
+#                                     # (summary/ carries extract_simfit.log --
+#                                     #  the stat-source line, the statonly-vs-
+#                                     #  conditioned cross-check and the Asimov
+#                                     #  closure, which live nowhere else)
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
 # Options (any command):
 #   --chan mu|ele   restrict to one channel (default: both)
@@ -47,7 +58,10 @@ while [ $# -gt 0 ]; do
     --chan) shift; CHANS="${1:-}";;
     --postfit) POSTFIT=1;;
     --dry-run|-n) DRY="-n";;
-    -h|--help) sed -n '2,29p' "$0"; exit 0;;
+    # print the WHOLE header block, however long it grows: from the line after
+    # the opening '# ===' rule to the closing one. A fixed line range silently
+    # truncates the help every time the header is extended -- as it just did.
+    -h|--help) sed -n '3,/^# ===/p' "$0" | sed '$d'; exit 0;;
     *) echo "[ERROR] unknown option: $1"; exit 1;;
   esac
   shift
@@ -207,10 +221,25 @@ download_results() {
     # statistical error, run by default -- and the _asimov closure fit, so a
     # local `run_pO_fits.sh --extract-only` on the downloaded tree reproduces
     # the complete summary incl. the stat/syst split and the closure rows)
-    local B rfd sfx
+    # NB `kind` -- NOT `sfx`, which is the OUTER discriminant loop's variable.
+    # Re-using it here works only because bash pre-expands a for-loop's word
+    # list, and that is far too subtle to rely on.
+    # the per-variant combine logs (t2w.log / fit.log / fit_statonly.log /
+    # fit_asimov.log): small text, and the only place a failed or badly
+    # converged fit explains itself -- the .root files do not.
+    local Blog
+    for Blog in lab fb; do
+      if rexists "$FORK_LX/test/$tree/simfit/fits/simfit_$Blog"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$Blog"
+        run --include '*.log' --exclude '*' \
+            "$LX:$FORK_LX/test/$tree/simfit/fits/simfit_$Blog/" \
+            "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$Blog/" || err=1
+      fi
+    done
+    local B rfd kind
     for B in lab fb; do
-      for sfx in "" "_statonly" "_asimov"; do
-        rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_${B}${sfx}.root"
+      for kind in "" "_statonly" "_asimov"; do
+        rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_${B}${kind}.root"
         if rexists "$rfd"; then
           mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B"
           run "$LX:$rfd" "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B/" || err=1
@@ -238,22 +267,23 @@ case "$CMD" in
     echo "[sync_lxplus] upload done. Next, on lxplus:"
     echo "    ssh $LX"
     echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
-    echo "    # DEFAULT = the grand simultaneous fit (simfit, mu+e in one likelihood):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh --asimov"
+    echo "    # DEFAULT: simfit (mu+e in one likelihood), --disc leppt_mt40,"
+    echo "    # QCD_MODE=abcd, and THREE fits per binning variant --"
+    echo "    # nominal + --statonly (the stat error) + --contour (sigma_W as a POI):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
+    echo "    # backup discriminant, PF MET (defaults to QCD_MODE=lnN):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc met"
     echo "    # legacy per-flavour pipeline + simfit together:"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all"
-    echo "    # PRIMARY discriminant (2026-08-17): lepton pT with mT>40"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc leppt_mt40"
-    echo "    # backup: PF MET"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
     echo "    # then impacts + covariance plots (pulled by 'download'):"
     echo "    ./run_pO_impacts.sh --disc leppt_mt40" ;;
   download)
-    echo "[sync_lxplus] download done. Next, locally (for the lepton-pT variants,"
-    echo "swap pO_fit_out for pO_fit_out_leppt or pO_fit_out_leppt_mt40):"
+    echo "[sync_lxplus] download done. Next, locally -- ONE command runs the whole"
+    echo "observables chain (charge asymmetry, F/B, sigma = r x sigma_gen, and the"
+    echo "(sigma_W, sigma_Z) contour) for that discriminant:"
     echo "    cd $ANA_LOCAL/analysis"
-    for c in $CHANS; do
-      echo "    root -l -q 'charge_asym.C+(\"$FORK_LOCAL/test/pO_fit_out/$c/summary/${c}_fitted_yields.root\")'"
-      echo "    root -l -q 'FBratio.C+(\"$FORK_LOCAL/test/pO_fit_out/$c/summary/${c}_fitted_yields.root\")'"
-    done ;;
+    echo "    ./run_observables.sh leppt_mt40      # or: met | all"
+    echo "Check in its output that the contour came from the scan, not the ellipse:"
+    echo "    [profiled] using .../higgsCombine_contour_lab.MultiDimFit.mH*.root"
+    echo "    [profiled] scan min vs covariance best fit: d(sigma_W) = +0.0000 nb" ;;
 esac
