@@ -140,7 +140,8 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
 - `my_script/draw_postfit_pO.C` — postfit data/MC, same cosmetics as
   `mtandmet.C`; optional trailing args (poi/dy/qcd parameter names + ndf) let
   the simfit pass its per-channel parameter names.
-- `run_pO_impacts.sh` — impacts + correlation plots; `--fit comb|mu|ele`.
+- `run_pO_impacts.sh` — impacts + correlation plots; `--fit comb|mu|ele|all`
+  (`all` = the grand fit + both flavfits in one call; absent fits are skipped).
 - `sync_lxplus.sh` — `upload` inputs+scripts / `download` results (the
   `simfit/` tree and the `simfit_{mu,ele}/` flavfit trees), one SSH auth.
 - (Removed 2026-09-22 with the legacy per-bin pipeline: `make_pO_datacards.sh`,
