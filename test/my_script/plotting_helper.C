@@ -595,51 +595,137 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
     delete c;
 }
 
-// Overlay TWO data graphs (e.g. muon vs electron) on the same axes, with the
-// shared nPDF theory error bands. g1..g4 are the (flavour-universal) model
-// graphs in the same order as SaveNiceGraph_ErrorBand; pass them null for a
-// data-only overlay (e.g. the charge asymmetry, which has no theory bands here).
-static void SaveNiceGraph_ErrorBand_TwoData(TGraphErrors *gA, const std::string &labelA,
-                                            TGraphErrors *gB, const std::string &labelB,
-                                            const std::string &outPathNoExt,
-                                            const std::string &xTitle,
-                                            const std::string &yTitle,
-                                            const std::string &mainTitle,
-                                            const std::string &subTitle1,
-                                            const std::string &subTitle2,
-                                            const std::vector<std::string> &boxLines,
-                                            const PlotStyle &ps = PlotStyle(),
-                                            GraphTuner tuner = nullptr,
-                                            TGraphErrors *g1 = nullptr,
-                                            TGraphErrors *g2 = nullptr,
-                                            TGraphErrors *g3 = nullptr,
-                                            TGraphErrors *g4 = nullptr)
+// -----------------------------------------------------------------------------
+// Overlay of several measurements of the SAME observable (2026-09-22: the
+// mu-only and e-only simultaneous fits, optionally with the combined one), each
+// drawn exactly like SaveNiceGraph draws one: point + STATISTICAL bar + the
+// systematic as a TBox (MakeSystBoxes). Replaces SaveNiceGraph_ErrorBand_TwoData
+// (the legacy mu-vs-e overlay, which drew total bars only and went away with
+// the legacy per-flavour fits).
+//
+// So the overlaid series do not sit on top of each other, every series is
+// drawn SHIFTED in x by xShift x (each point's own x error = its bin
+// half-width) with the horizontal bars dropped; the systematic box is centred
+// on the shifted point, half-width ps.systBoxWidthFrac x the x error (callers
+// pick shifts and width so neighbouring boxes cannot touch, e.g. +-0.35 / 0.2),
+// filled in the series colour. The frame keeps the full bin range of the
+// unshifted graphs (TGraph's own 10% margin), so the axes match the single-fit
+// plots. g1..g4 = the nPDF theory bands, same order/colours as
+// SaveNiceGraph_ErrorBand. The tuner runs BEFORE the series styles are
+// applied (the shared tuners set a marker style of their own).
+// Legends: without theory bands one legend, lower left; with them the data
+// legend moves to the upper left (under the CMS label) and the theory legend
+// keeps the lower left, as in the single-fit R_FB plots.
+struct OverlaySeries
 {
-    if (!gA && !gB)
+    TGraphErrors *gTot = nullptr;  // points + TOTAL error (required)
+    TGraphErrors *gStat = nullptr; // same points + STATISTICAL error (nullptr -> one total bar, no box)
+    std::string label;
+    int color = kBlack;
+    int marker = 20;
+    double markerSize = 1.3;
+    double xShift = 0.0;           // in units of each point's x error
+};
+
+static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
+                                  const std::string &outPathNoExt,
+                                  const std::string &xTitle,
+                                  const std::string &yTitle,
+                                  const std::string &mainTitle,
+                                  const std::string &subTitle1,
+                                  const std::string &subTitle2,
+                                  const std::vector<std::string> &boxLines,
+                                  const PlotStyle &ps = PlotStyle(),
+                                  GraphTuner tuner = nullptr,
+                                  TGraphErrors *g1 = nullptr,
+                                  TGraphErrors *g2 = nullptr,
+                                  TGraphErrors *g3 = nullptr,
+                                  TGraphErrors *g4 = nullptr)
+{
+    std::vector<const OverlaySeries *> ser;
+    for (const OverlaySeries &s : series)
+        if (s.gTot && s.gTot->GetN() > 0)
+            ser.push_back(&s);
+    if (ser.empty())
         return;
 
     gStyle->SetOptStat(ps.showStats ? 1110 : 0);
-    TGraphErrors *base = gA ? gA : gB; // defines the frame
-    TCanvas *c = new TCanvas(Form("c_ovl_%s", base->GetName()), "", ps.w, ps.h);
+
+    // frame = the full bin range of the UNSHIFTED graphs + TGraph's 10% margin
+    double xlo = 1e300, xhi = -1e300;
+    for (const OverlaySeries *s : ser)
+        for (int i = 0; i < s->gTot->GetN(); ++i)
+        {
+            xlo = std::min(xlo, s->gTot->GetPointX(i) - s->gTot->GetErrorX(i));
+            xhi = std::max(xhi, s->gTot->GetPointX(i) + s->gTot->GetErrorX(i));
+        }
+    const double mx = 0.1 * (xhi - xlo);
+    xlo -= mx;
+    xhi += mx;
+
+    // per series: the drawn graph (shifted, no x bars; stat bars when known)
+    // and its systematic boxes (from shifted clones that keep the x errors,
+    // which MakeSystBoxes sizes the boxes from)
+    std::vector<TGraphErrors *> gDraw;
+    std::vector<std::vector<TBox *>> boxes;
+    for (size_t k = 0; k < ser.size(); ++k)
+    {
+        const OverlaySeries *s = ser[k];
+        const bool haveStat = s->gStat && s->gStat->GetN() == s->gTot->GetN();
+        if (s->gStat && !haveStat)
+            std::cerr << "[WARN] SaveNiceGraph_Overlay: stat graph of '" << s->label
+                      << "' has a different number of points -> total bars only\n";
+        TGraphErrors *src = haveStat ? s->gStat : s->gTot;
+        const int n = src->GetN();
+        TGraphErrors *gd = new TGraphErrors(n);
+        gd->SetName(Form("%s_ovl%d", s->gTot->GetName(), (int)k));
+        TGraphErrors *bt = (TGraphErrors *)s->gTot->Clone(Form("%s_ovlT%d", s->gTot->GetName(), (int)k));
+        TGraphErrors *bs = haveStat ? (TGraphErrors *)s->gStat->Clone(Form("%s_ovlS%d", s->gTot->GetName(), (int)k)) : nullptr;
+        for (int i = 0; i < n; ++i)
+        {
+            const double x = s->gTot->GetPointX(i) + s->xShift * s->gTot->GetErrorX(i);
+            gd->SetPoint(i, x, src->GetPointY(i));
+            gd->SetPointError(i, 0.0, src->GetErrorY(i));
+            bt->SetPoint(i, x, s->gTot->GetPointY(i));
+            if (bs) bs->SetPoint(i, x, s->gStat->GetPointY(i));
+        }
+        PlotStyle pb = ps;
+        pb.systBoxFillColor = s->color;
+        pb.systBoxLineColor = s->color;
+        boxes.push_back(bs ? MakeSystBoxes(bt, bs, pb) : std::vector<TBox *>());
+        gDraw.push_back(gd);
+    }
+
+    TCanvas *c = new TCanvas(Form("c_ovl_%s", ser[0]->gTot->GetName()), "", ps.w, ps.h);
     ApplyCanvasStyle(c, ps);
     c->cd();
 
+    TGraphErrors *base = gDraw[0];
     ApplyGraphStyle(base, ps, xTitle, yTitle);
-    // data A (e.g. muon): black circles ; data B (e.g. electron): red squares
-    if (gA) { gA->SetMarkerStyle(20); gA->SetMarkerSize(1.2); gA->SetMarkerColor(kBlack); gA->SetLineColor(kBlack); }
-    if (gB) { gB->SetMarkerStyle(21); gB->SetMarkerSize(1.2); gB->SetMarkerColor(kRed + 1); gB->SetLineColor(kRed + 1); }
+    base->Draw(ps.drawOptGraph.c_str()); // axes (+ the first series, redrawn on top below)
+    base->GetXaxis()->SetLimits(xlo, xhi);
 
-    base->Draw(ps.drawOptGraph.c_str()); // axes + first data graph
     DrawHeader(ps, mainTitle, subTitle1, subTitle2);
     DrawInfoBox(ps, boxLines);
     if (tuner)
         tuner(c, base);
     CMS_lumi(c, 13, 10);
 
+    // series cosmetics AFTER the tuner (it sets a marker style of its own)
+    for (size_t k = 0; k < ser.size(); ++k)
+    {
+        gDraw[k]->SetMarkerStyle(ser[k]->marker);
+        gDraw[k]->SetMarkerSize(ser[k]->markerSize);
+        gDraw[k]->SetMarkerColor(ser[k]->color);
+        gDraw[k]->SetLineColor(ser[k]->color);
+        gDraw[k]->SetLineWidth(2);
+    }
+
     // shared theory bands (same order/colours/names as SaveNiceGraph_ErrorBand)
     TGraphErrors *models[4] = {g1, g2, g3, g4};
     const int     mcol[4]   = {kAzure - 2, kGreen + 2, kOrange + 1, kViolet + 1};
     const char   *mname[4]  = {"EPPS21", "nCTEQ15HQ", "nNNPDF3.0", "TUJU21nlo"};
+    int nModels = 0;
     for (int i = 0; i < 4; ++i)
     {
         TGraphErrors *gm = models[i];
@@ -650,22 +736,51 @@ static void SaveNiceGraph_ErrorBand_TwoData(TGraphErrors *gA, const std::string 
         gm->SetMarkerSize(0);
         gm->SetMarkerStyle(0);
         gm->Draw("3");
+        ++nModels;
     }
 
-    // data points on top of the bands
-    if (gA) gA->Draw("P SAME");
-    if (gB) gB->Draw("P SAME");
+    // systematic boxes over the bands, then every series' points on top
+    bool anyBox = false;
+    for (const std::vector<TBox *> &bv : boxes)
+        for (TBox *b : bv) { b->Draw(); anyBox = true; }
+    for (TGraphErrors *gd : gDraw)
+        gd->Draw("P SAME");
 
-    TLegend *leg = new TLegend(0.20, 0.15, 0.47, 0.42);
+    // legends (see the header comment for the placement)
+    const double rowH = 0.042;
+    const int nData = (int)ser.size() + (anyBox ? 1 : 0);
+    double lx1 = 0.18, lx2 = 0.55, ly1, ly2;
+    if (nModels > 0) { ly2 = 0.78; ly1 = ly2 - rowH * nData; }   // upper left, under "CMS"
+    else             { ly1 = 0.15; ly2 = ly1 + rowH * nData; }   // lower left
+    if (ps.legX2 > ps.legX1 && ps.legY2 > ps.legY1)               // caller override
+    { lx1 = ps.legX1; ly1 = ps.legY1; lx2 = ps.legX2; ly2 = ps.legY2; }
+    TLegend *leg = new TLegend(lx1, ly1, lx2, ly2);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
     leg->SetTextFont(42);
     leg->SetTextSize(0.032);
-    if (gA) leg->AddEntry(gA, labelA.c_str(), "p");
-    if (gB) leg->AddEntry(gB, labelB.c_str(), "p");
-    for (int i = 0; i < 4; ++i)
-        if (models[i]) leg->AddEntry(models[i], mname[i], "f");
+    for (size_t k = 0; k < ser.size(); ++k)
+        leg->AddEntry(gDraw[k], ser[k]->label.c_str(), "lep");
+    if (anyBox)
+    {
+        TBox *key = new TBox(0, 0, 1, 1); // legend glyph only, never drawn
+        key->SetFillColorAlpha(kGray + 1, ps.systBoxFillAlpha);
+        key->SetFillStyle(ps.systBoxFillStyle);
+        key->SetLineColor(kGray + 3);
+        leg->AddEntry(key, "bars: stat.,  boxes: syst.", "f");
+    }
     leg->Draw();
+    if (nModels > 0)
+    {
+        TLegend *legT = new TLegend(0.20, 0.15, 0.45, 0.15 + rowH * nModels);
+        legT->SetBorderSize(0);
+        legT->SetFillStyle(0);
+        legT->SetTextFont(42);
+        legT->SetTextSize(0.032);
+        for (int i = 0; i < 4; ++i)
+            if (models[i]) legT->AddEntry(models[i], mname[i], "f");
+        legT->Draw();
+    }
 
     c->RedrawAxis();
     c->Modified();

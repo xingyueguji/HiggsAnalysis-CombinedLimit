@@ -8,6 +8,17 @@
 #   {mu,ele} x {Wp,Wm} x y0..y11   ->  48 W channels, named <F>_<C>_<B>_y<i>
 #   mu_Z_incl, ele_Z_incl          ->   2 Z channels
 #
+# PER-FLAVOUR cards (2026-09-22, env SIMFIT_FLAVS = mu | ele; the default
+# "mu ele" is the grand fit above): the SAME model restricted to ONE lepton
+# flavour -- its 24 W channels + its own Z peak (+ its 6 CR channels in abcd
+# mode), still 25 POIs (r_<C>_y<i> + r_Z, now fitted by that flavour alone),
+# and every nuisance that acts on it: lumi, that flavour's two QCD rows, and
+# the shape rows ITS sidecars list (so muSF only in the muon card). Rows that
+# would be all '-' (the other flavour's QCD lnN) are not written. Driven by
+# run_pO_fits.sh mode `flavfit` (work dirs simfit_mu/, simfit_ele/); the
+# other flavour's input arguments are then ignored (pass "none"). With both
+# flavours the cards and maps are byte-identical to the pre-2026-09-22 ones.
+#
 # Fit model: 2N+1 = 25 POIs (N = 12 rapidity bins), applied at text2workspace
 # time via multiSignalModel -- the map file written NEXT TO each card
 # (t2w_maps_simfit_<B>.txt, one 'map=' per line) is the single definition:
@@ -94,10 +105,11 @@
 # same CR channels appear in both cards, BUT the CRB w_y* shapes come from
 # w_lab_y*/w_fb_y* respectively -- the per-y split must match that card's POIs.
 #
-# The legacy per-bin pipeline (make_pO_datacards.sh) is untouched and stays
-# runnable for comparison.
+# (The legacy per-bin pipeline, make_pO_datacards.sh, was removed 2026-09-22:
+# the per-flavour fit is this generator with SIMFIT_FLAVS, see above.)
 #
 # Usage: make_pO_simfit_cards.sh <muW> <muZ> <eleW> <eleZ> <outdir> [disc]
+#        (SIMFIT_FLAVS=mu|ele: the absent flavour's two inputs are not read)
 # bash-3.2 safe (macOS stock bash): no associative arrays.
 # =============================================================================
 set -euo pipefail
@@ -161,6 +173,31 @@ SIGMA_POI="${SIGMA_POI:-0}"        # 1 -> ALSO write t2w_maps_simfit_<B>_sigma.t
                                    #  sigma_W a POI (same card; see write_sigma_maps)
 GEN_XSEC_FID="${GEN_XSEC_FID:-}"   # gen fiducial sigma sidecar (skim/output/gen_xsec_fid.txt);
                                    #  required by SIGMA_POI=1, ignored otherwise
+SIMFIT_FLAVS="${SIMFIT_FLAVS:-mu ele}"  # the lepton flavours in the card (2026-09-22):
+                                        #  "mu ele" = the grand fit, mu | ele = a per-flavour fit
+
+# ---- flavours in this card: FLAVS in the canonical order mu, ele (so the
+# grand card's column order never depends on how the list was spelled) ------
+for f in $SIMFIT_FLAVS; do
+  case "$f" in
+    mu|ele) ;;
+    *) echo "[make_pO_simfit_cards] ERROR SIMFIT_FLAVS='$SIMFIT_FLAVS' (allowed: mu, ele)" >&2; exit 2 ;;
+  esac
+done
+FLAVS=""; USE_MU=0; USE_ELE=0
+case " $SIMFIT_FLAVS " in *" mu "*)  FLAVS="$FLAVS mu";  USE_MU=1 ;; esac
+case " $SIMFIT_FLAVS " in *" ele "*) FLAVS="$FLAVS ele"; USE_ELE=1 ;; esac
+FLAVS="${FLAVS# }"
+if [ -z "$FLAVS" ]; then echo "[make_pO_simfit_cards] ERROR SIMFIT_FLAVS is empty" >&2; exit 2; fi
+# the flavour alternation of every map regex: "(mu|ele)" keeps the grand
+# fit's maps byte-identical; a per-flavour card matches its own channels only
+if [ "$USE_MU" = 1 ] && [ "$USE_ELE" = 1 ]; then FLAVRE="(mu|ele)"; else FLAVRE="$FLAVS"; fi
+# the inputs of the flavours in use must exist (the card only records paths,
+# so a missing file would otherwise surface much later, inside text2workspace)
+for pair in "$USE_MU|$WMU" "$USE_MU|$ZMU" "$USE_ELE|$WEL" "$USE_ELE|$ZEL"; do
+  [ "${pair%%|*}" = 1 ] || continue
+  [ -f "${pair#*|}" ] || { echo "[make_pO_simfit_cards] ERROR input not found: ${pair#*|}" >&2; exit 2; }
+done
 
 if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
   echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
@@ -191,18 +228,34 @@ sidecar_procs() {  # $1 = input .root, $2 = syst -> its histogram-process list
 }
 LHE_THEORY="nPDF qcdScale alphaS"   # the LHE (theory) families; every other listed name is a lepton-SF one
 LHENAMES=""   # space-separated shape systematics in use ("" = none), sidecar order
+# Only the sidecars of the flavours IN this card count (2026-09-22): a
+# per-flavour card must not pick up the other flavour's systematics -- muSF in
+# an electron card would be a row of '-' only. Historical order muW eleW muZ
+# eleZ, so the grand card's row order is unchanged.
+used_sidecar_systs() {
+  if [ "$USE_MU" = 1 ];  then sidecar_systs "$WMU"; fi
+  if [ "$USE_ELE" = 1 ]; then sidecar_systs "$WEL"; fi
+  if [ "$USE_MU" = 1 ];  then sidecar_systs "$ZMU"; fi
+  if [ "$USE_ELE" = 1 ]; then sidecar_systs "$ZEL"; fi
+}
+USED_LABELS=""; ALLONES=""   # e.g. "muW eleW muZ eleZ" / "1111" for the grand card
+for pair in "$USE_MU|muW" "$USE_ELE|eleW" "$USE_MU|muZ" "$USE_ELE|eleZ"; do
+  if [ "${pair%%|*}" = 1 ]; then USED_LABELS="$USED_LABELS ${pair#*|}"; ALLONES="${ALLONES}1"; fi
+done
+USED_LABELS="${USED_LABELS# }"
 if [ "$LHE_SYST" != "off" ]; then
-  ALLS=$( { sidecar_systs "$WMU"; sidecar_systs "$WEL"; sidecar_systs "$ZMU"; sidecar_systs "$ZEL"; } | awk 'NF && !seen[$0]++' )
+  ALLS=$( used_sidecar_systs | awk 'NF && !seen[$0]++' )
   for s in $ALLS; do
     case ",$LHE_SYST," in *,auto,*|*",$s,"*) ;; *) continue ;; esac
     LHENAMES="$LHENAMES $s"
     have=""
-    for f in "$WMU" "$WEL" "$ZMU" "$ZEL"; do
-      case " $(sidecar_systs "$f" | tr '\n' ' ') " in *" $s "*) have="${have}1" ;; *) have="${have}0" ;; esac
+    for pair in "$USE_MU|$WMU" "$USE_ELE|$WEL" "$USE_MU|$ZMU" "$USE_ELE|$ZEL"; do
+      [ "${pair%%|*}" = 1 ] || continue
+      case " $(sidecar_systs "${pair#*|}" | tr '\n' ' ') " in *" $s "*) have="${have}1" ;; *) have="${have}0" ;; esac
     done
     case " $LHE_THEORY " in
-      *" $s "*) [ "$have" = "1111" ] || echo "[make_pO_simfit_cards] WARN theory syst '$s' listed by inputs (muW eleW muZ eleZ) = $have only -> entries only where listed (inputs out of step?)" >&2 ;;
-      *) echo "[make_pO_simfit_cards] lepton-SF syst '$s' listed by inputs (muW eleW muZ eleZ) = $have -> entries on those columns only" ;;
+      *" $s "*) [ "$have" = "$ALLONES" ] || echo "[make_pO_simfit_cards] WARN theory syst '$s' listed by inputs ($USED_LABELS) = $have only -> entries only where listed (inputs out of step?)" >&2 ;;
+      *) echo "[make_pO_simfit_cards] lepton-SF syst '$s' listed by inputs ($USED_LABELS) = $have -> entries on those columns only" ;;
     esac
   done
   LHENAMES="${LHENAMES# }"
@@ -232,7 +285,9 @@ done
 # auto follows it (coherent when absent = the inclusive SF); an explicit env
 # value overrides for robustness checks.
 SF_TRIG_SRC="env"
-if [ "$SF_TRIG_CORR" = "auto" ]; then
+if [ "$SF_TRIG_CORR" = "auto" ] && [ "$USE_MU" = 0 ]; then
+  SF_TRIG_CORR="coherent"; SF_TRIG_SRC="auto: no muon channels in this card"
+elif [ "$SF_TRIG_CORR" = "auto" ]; then
   SF_TRIG_CORR=$(awk '$1=="#!" && $2=="muTrig" && $3=="corr" {print $4; exit}' "${WMU%.root}_systs.txt" 2>/dev/null || true)
   if [ -n "$SF_TRIG_CORR" ]; then SF_TRIG_SRC="auto: muon W sidecar directive"
   else SF_TRIG_CORR="coherent"; SF_TRIG_SRC="auto: no directive in the muon W sidecar -> coherent (only matters for a separate muTrig nuisance)"; fi
@@ -298,7 +353,7 @@ gen_simfit_card() {  # $1 = lab | fb
   # abcd mode fits the A0-normalized template (7th input-file object) so the
   # formula rateParam (sB*sC/sD, init 1) needs no baked constants.
   QPATH="qcd"; [ "$QCD_MODE" = "abcd" ] && QPATH="qcd_abcd"
-  for F in mu ele; do
+  for F in $FLAVS; do
     if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
     for C in Wp Wm; do
       for iy in $YBINS; do
@@ -345,7 +400,8 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
   done
 
   # ---- 2 Z channels (w/wtau deliberately have NO scaling parameter: frozen) ---
-  for F in mu ele; do
+  # (one in a per-flavour card: that flavour's own peak pins its r_Z)
+  for F in $FLAVS; do
     if [ "$F" = "mu" ]; then ZF="$ZMU"; else ZF="$ZEL"; fi
     CH="${F}_Z_incl"
     SHAPES="${SHAPES}
@@ -374,7 +430,7 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
   # entry to MB/MP/MI/MR AND to all five systematics rows in the same block
   # AND (via lhe_append CR ..., always '-') to every LHE shape row.
   if [ "$QCD_MODE" = "abcd" ]; then
-    for F in mu ele; do
+    for F in $FLAVS; do
       if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
       for C in Wp Wm; do
         # --- CRB: iso-pass, m_T<30 (EWK ~10-20%: z/ztau ride r_Z; W floats or freezes) ---
@@ -454,11 +510,18 @@ qcd_abcd_${F}_${C} rateParam ${F}_${C}_${B}_y* qcd (@0*@1/@2) qcd_sB_${F}_${C},q
   SYST="
 ${SLUMI}"
   if [ "$QCD_MODE" != "free" ]; then
-    SYST="${SYST}
+    # only the rows of the flavours IN the card: in a per-flavour card the
+    # other flavour's two rows would be all '-' (a nuisance touching nothing)
+    if [ "$USE_MU" = 1 ]; then
+      SYST="${SYST}
 ${SQMWP}
-${SQMWM}
+${SQMWM}"
+    fi
+    if [ "$USE_ELE" = 1 ]; then
+      SYST="${SYST}
 ${SQEWP}
 ${SQEWM}"
+    fi
   fi
   # shape rows (2026-09-07 LHE, 2026-09-14 lepton SFs) + the groups for
   # --freezeNuisanceGroups: `lhe` = the theory ones, `lepsf` = the lepton-SF
@@ -498,22 +561,39 @@ lepsf group = ${SFALL}"
     LHEDESC="shape systematics -- theory (group lhe): ${THNAMES:-none}; lepton SFs (group lepsf): ${SFALL:-none}; <proc>_<syst>Up/Down from the input files' sidecars, entries only on the columns of the inputs listing them"
     [ -n "$SFEDIT" ] && LHEDESC="${LHEDESC}; muTrig decorrelated per rapidity bin via nuisance edit rename (SF_TRIG_CORR=perbin)"
   fi
+  # the kappas / CR count of the flavours in the card (grand card: the
+  # historical text, byte for byte)
+  KDA=""; KDL=""
+  if [ "$USE_MU" = 1 ];  then KDA="mu ${QCD_ABCD_LNN_MU}"; KDL="mu ${QCD_LNN_MU}"; fi
+  if [ "$USE_ELE" = 1 ]; then KDA="${KDA:+$KDA / }ele ${QCD_ABCD_LNN_ELE}"; KDL="${KDL:+$KDL, }ele ${QCD_LNN_ELE}"; fi
+  NCR=$((6 * (USE_MU + USE_ELE)))
   if [ "$QCD_MODE" = "free" ]; then
     QDESC="qcd_norm free rateParam per W channel"
   elif [ "$QCD_MODE" = "abcd" ]; then
-    QDESC="QCD in-fit ABCD: 12 CR channels + (sB*sC/sD) formula rateParam on the SR qcd_abcd; residual lnN mu ${QCD_ABCD_LNN_MU} / ele ${QCD_ABCD_LNN_ELE}; CRB W-part ${QCD_WCR}"
+    QDESC="QCD in-fit ABCD: ${NCR} CR channels + (sB*sC/sD) formula rateParam on the SR qcd_abcd; residual lnN ${KDA}; CRB W-part ${QCD_WCR}"
   else
-    QDESC="QCD lnN (ABCD) per flavour x charge: mu ${QCD_LNN_MU}, ele ${QCD_LNN_ELE}"
+    QDESC="QCD lnN (ABCD) per flavour x charge: ${KDL}"
   fi
-
-  cat > "$CARD" <<EOF
-# Auto-generated by make_pO_simfit_cards.sh -- GRAND SIMULTANEOUS FIT, ${B} binning,
+  if [ "$USE_MU" = 1 ] && [ "$USE_ELE" = 1 ]; then
+    CARDHEAD="# Auto-generated by make_pO_simfit_cards.sh -- GRAND SIMULTANEOUS FIT, ${B} binning,
 # ${DISCLABEL} W discriminant.  48 W channels ({mu,ele} x {Wp,Wm} x y0..11) + both
 # Z-inclusive peaks in ONE likelihood.  The 25-POI model (r_<C>_y<i> shared mu/e,
 # + global r_Z on all DY-related MC) is applied at text2workspace time via
 # multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
 # ${QDESC}; lumi lnN ${LUMI_LNN} on all MC (not qcd);
-# w/wtau under the Z peaks FROZEN at absolute MC (negligible: <0.1 evt).
+# w/wtau under the Z peaks FROZEN at absolute MC (negligible: <0.1 evt)."
+  else
+    CARDHEAD="# Auto-generated by make_pO_simfit_cards.sh -- PER-FLAVOUR SIMULTANEOUS FIT (${FLAVS} only),
+# ${B} binning, ${DISCLABEL} W discriminant.  24 W channels (${FLAVS} x {Wp,Wm} x
+# y0..11) + the ${FLAVS} Z-inclusive peak in ONE likelihood.  The 25-POI model
+# (r_<C>_y<i> of this flavour alone, + r_Z on all DY-related MC) is applied at
+# text2workspace time via multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
+# ${QDESC}; lumi lnN ${LUMI_LNN} on all MC (not qcd);
+# w/wtau under the Z peak FROZEN at absolute MC (negligible: <0.1 evt)."
+  fi
+
+  cat > "$CARD" <<EOF
+${CARDHEAD}
 # ${LHEDESC}
 imax ${NCH}
 jmax *
@@ -533,10 +613,12 @@ EOF
   # ---- the model: one 'map=' per line, consumed as --PO map=... at t2w time ---
   # re.match runs each regex against "bin/process"; the trailing /... makes y1
   # safe against y10/y11, and the \$ anchors keep 'z' from matching 'ztau'.
+  # FLAVRE = "(mu|ele)" in the grand card (unchanged), "mu" / "ele" in a
+  # per-flavour one, where the other flavour's channels do not exist.
   : > "$MAPS"
   for C in Wp Wm; do
     for iy in $YBINS; do
-      echo "map=(mu|ele)_${C}_${B}_y${iy}/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      echo "map=${FLAVRE}_${C}_${B}_y${iy}/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
     done
   done
   if [ "$QCD_MODE" = "abcd" ] && [ "$QCD_WCR" != "frozen" ]; then
@@ -545,7 +627,7 @@ EOF
     # w_y1 from matching w_y10 (no trailing-/ trick needed here).
     for C in Wp Wm; do
       for iy in $YBINS; do
-        echo "map=(mu|ele)_${C}_CRB/w_y${iy}\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+        echo "map=${FLAVRE}_${C}_CRB/w_y${iy}\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
       done
     done
   fi
@@ -604,7 +686,7 @@ write_sigma_maps() {
     echo "                              (run skim/gen_xsec.C, then sync_lxplus.sh upload)"
     return 1
   fi
-  awk -v B="$B" -v QMODE="$QCD_MODE" -v QWCR="$QCD_WCR" '
+  awk -v B="$B" -v QMODE="$QCD_MODE" -v QWCR="$QCD_WCR" -v FRE="$FLAVRE" '
     /^#/ { next }
     $1 == B { key = $2 "_y" $3; g[key] = $4 + 0; order[++n] = key; tot += $4 }
     END {
@@ -628,9 +710,9 @@ write_sigma_maps() {
         # map list on commas): re-listing a factory-defined name on a second
         # plain map= line would push it into the POI set as a bare variable and
         # collide with the RooFormulaVar.
-        pat = sprintf("(mu|ele)_%s_%s_y%s/(signal|wtau)$", C, B, iy)
+        pat = sprintf("%s_%s_%s_y%s/(signal|wtau)$", FRE, C, B, iy)
         if (QMODE == "abcd" && QWCR != "frozen")
-          pat = pat sprintf(",(mu|ele)_%s_CRB/w_y%s$", C, iy)
+          pat = pat sprintf(",%s_%s_CRB/w_y%s$", FRE, C, iy)
         if (key == anchor)
           printf "map=%s:r_%s=expr;;r_%s(\"@0/@1\",sigmaW,Wnorm)\n", pat, key, key
         else
@@ -663,6 +745,10 @@ if [ "$QCD_MODE" = "abcd" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE
 # The key keeps its 2026-09-07 name for the readers; sfTrigCorr records the
 # muTrig correlation choice.
 LHELIST=$(echo "$NUISLIST" | tr -s ' ' ',' | sed 's/^,//; s/,$//'); LHELIST="${LHELIST:-none}"
+# flavours (2026-09-22): the lepton flavours of THESE cards, comma-joined so the
+# file stays one key + one token per line (postfit_incl.C reads it as pairs).
+# The extractor is told the same list by run_pO_fits.sh and checks it; a
+# sidecar without the line predates per-flavour fits = mu,ele.
 cat > "$OUTDIR/qcd_lnn_kappas.txt" <<EOF
 kQcdMu $KQM
 kQcdEle $KQE
@@ -670,8 +756,12 @@ kLumi $LUMI_LNN
 qcdMode $QCD_MODE
 lheSysts $LHELIST
 sfTrigCorr $SF_TRIG_CORR
+flavours $(echo "$FLAVS" | tr ' ' ',')
 EOF
 
-echo "[make_pO_simfit_cards] done -> ${OUTDIR} (W discriminant: ${DISCLABEL})"
-echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (mu ${KQM} / ele ${KQE}); lumi lnN ${LUMI_LNN}"
+echo "[make_pO_simfit_cards] done -> ${OUTDIR} (flavours: ${FLAVS}; W discriminant: ${DISCLABEL})"
+KMSG=""
+if [ "$USE_MU" = 1 ];  then KMSG="mu ${KQM}"; fi
+if [ "$USE_ELE" = 1 ]; then KMSG="${KMSG:+$KMSG / }ele ${KQE}"; fi
+echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (${KMSG}); lumi lnN ${LUMI_LNN}"
 echo "[make_pO_simfit_cards] shape systematics: theory [${THNAMES:-none}] lepton SF [${SFALL:-none}] (LHE_SYST=${LHE_SYST}, SF_TRIG_CORR=${SF_TRIG_CORR} from ${SF_TRIG_SRC})"

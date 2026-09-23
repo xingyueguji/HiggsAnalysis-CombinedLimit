@@ -11,7 +11,10 @@
 #                                     #  lepton-pT variant W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
 #   ./sync_lxplus.sh download         # pull, for every out-tree present
-#                                     # (pO_fit_out[_leppt[_mt40]]):
+#                                     # (pO_fit_out[_leppt[_mt40]]) and for each
+#                                     # fit in it -- simfit/ (grand) and, when
+#                                     # run, simfit_mu/ + simfit_ele/ (flavfit,
+#                                     # 2026-09-22; same layout, same pulls):
 #                                     #   summary/   fitted yields + CSVs
 #                                     #   datacards/ cards + t2w maps (incl. the
 #                                     #              _sigma contour maps) + the
@@ -26,7 +29,8 @@
 #                                     #  closure, which live nowhere else)
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
 # Options (any command):
-#   --chan mu|ele   restrict to one channel (default: both)
+#   --chan mu|ele   restrict to one channel (default: both; also selects which
+#                   flavfit tree, simfit_mu/ or simfit_ele/, is downloaded)
 #   --dry-run       show what rsync would do, transfer nothing (-n)
 #
 # ONE password prompt per run: a single shared SSH connection (ControlMaster) is
@@ -131,11 +135,10 @@ upload_scripts() {
   run "$FORK_LOCAL/test/run_pO_fits.sh" \
       "$FORK_LOCAL/test/run_pO_impacts.sh" \
       "$LX:$FORK_LX/test/" || err=1
-  run "$FORK_LOCAL/test/my_script/make_pO_datacards.sh" \
-      "$FORK_LOCAL/test/my_script/make_pO_simfit_cards.sh" \
-      "$FORK_LOCAL/test/my_script/extract_pO_yields.C" \
+  # (the legacy per-bin scripts make_pO_datacards.sh / extract_pO_yields.C /
+  #  make_yields_from_csv.C were removed with that pipeline on 2026-09-22)
+  run "$FORK_LOCAL/test/my_script/make_pO_simfit_cards.sh" \
       "$FORK_LOCAL/test/my_script/extract_pO_simfit.C" \
-      "$FORK_LOCAL/test/my_script/make_yields_from_csv.C" \
       "$FORK_LOCAL/test/my_script/draw_postfit_pO.C" \
       "$FORK_LOCAL/test/my_script/plot_pO_cov.C" \
       "$FORK_LOCAL/test/my_script/plotting_helper.C" \
@@ -150,46 +153,28 @@ download_results() {
   for sfx in "" "_leppt" "_leppt_mt40"; do
     local tree="pO_fit_out${sfx}"
     echo "== download fit results <- $LX:$FORK_LX/test/$tree/ =="
-    for c in $CHANS; do
-      local rsum="$FORK_LX/test/$tree/$c/summary"
-      if rexists "$rsum"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/$c/summary"
-        run "$LX:$rsum/" "$FORK_LOCAL/test/$tree/$c/summary/" && got=1 || err=1
-      else
-        echo "[skip] no remote $tree/$c/summary (fit not run for that channel/discriminant?)"
-      fi
-      # the datacards actually fitted (local dry-runs regenerate the local
-      # copies with local env defaults, so they can silently disagree with the
-      # downloaded summary); silent skip when absent
-      local rdc="$FORK_LX/test/$tree/$c/datacards"
-      if rexists "$rdc"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/$c/datacards"
-        run "$LX:$rdc/" "$FORK_LOCAL/test/$tree/$c/datacards/" || err=1
-      fi
-      if [ "$POSTFIT" -eq 1 ]; then
-        local rpost="$FORK_LX/test/$tree/$c/postfit"
-        if rexists "$rpost"; then
-          mkdir -p "$FORK_LOCAL/test/$tree/$c/postfit"
-          run "$LX:$rpost/" "$FORK_LOCAL/test/$tree/$c/postfit/" || err=1
-        else
-          echo "[skip] no remote $tree/$c/postfit (ran with --no-postfit, or plots not made)"
-        fi
-      fi
-    done
-    # the grand simultaneous fit (simfit, 2026-08-04): flavourless, so outside
-    # the per-channel loop; skipped silently when not run for this disc
-    local rsimsum="$FORK_LX/test/$tree/simfit/summary"
+    # (the legacy per-channel trees <tree>/{mu,ele}/ are no longer pulled: that
+    #  pipeline was removed on 2026-09-22)
+    # the grand simultaneous fit (simfit, 2026-08-04), skipped silently when not
+    # run for this disc, + the per-flavour simultaneous fits (flavfit,
+    # 2026-09-22): simfit_mu/ and simfit_ele/ have EXACTLY the grand fit's
+    # layout, so everything below is pulled for each of them too (restricted
+    # by --chan)
+    local sim flavtrees=""
+    for c in $CHANS; do flavtrees="$flavtrees simfit_$c"; done
+    for sim in simfit $flavtrees; do
+    local rsimsum="$FORK_LX/test/$tree/$sim/summary"
     if rexists "$rsimsum"; then
-      mkdir -p "$FORK_LOCAL/test/$tree/simfit/summary"
-      run "$LX:$rsimsum/" "$FORK_LOCAL/test/$tree/simfit/summary/" && got=1 || err=1
+      mkdir -p "$FORK_LOCAL/test/$tree/$sim/summary"
+      run "$LX:$rsimsum/" "$FORK_LOCAL/test/$tree/$sim/summary/" && got=1 || err=1
     else
-      echo "[skip] no remote $tree/simfit/summary (simfit not run for that discriminant?)"
+      echo "[skip] no remote $tree/$sim/summary ($sim not run for that discriminant?)"
     fi
     if [ "$POSTFIT" -eq 1 ]; then
-      local rsimpost="$FORK_LX/test/$tree/simfit/postfit"
+      local rsimpost="$FORK_LX/test/$tree/$sim/postfit"
       if rexists "$rsimpost"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/simfit/postfit"
-        run "$LX:$rsimpost/" "$FORK_LOCAL/test/$tree/simfit/postfit/" || err=1
+        mkdir -p "$FORK_LOCAL/test/$tree/$sim/postfit"
+        run "$LX:$rsimpost/" "$FORK_LOCAL/test/$tree/$sim/postfit/" || err=1
       fi
     fi
     # datacards (2026-08-24): the cards + t2w maps + qcd_lnn_kappas.txt sidecar
@@ -206,11 +191,11 @@ download_results() {
     # locally -- plotting/xsec_contour.C reads only the scan tree).
     local d
     for d in datacards impacts cov contour; do
-      local rdir="$FORK_LX/test/$tree/simfit/$d"
+      local rdir="$FORK_LX/test/$tree/$sim/$d"
       if rexists "$rdir"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/simfit/$d"
+        mkdir -p "$FORK_LOCAL/test/$tree/$sim/$d"
         run --exclude 'wd_*' --exclude 'workspace_sigma.root' \
-            "$LX:$rdir/" "$FORK_LOCAL/test/$tree/simfit/$d/" || err=1
+            "$LX:$rdir/" "$FORK_LOCAL/test/$tree/$sim/$d/" || err=1
       fi
     done
     # the FitDiagnostics results themselves (2026-09-07): with LHE shape
@@ -229,23 +214,26 @@ download_results() {
     # converged fit explains itself -- the .root files do not.
     local Blog
     for Blog in lab fb; do
-      if rexists "$FORK_LX/test/$tree/simfit/fits/simfit_$Blog"; then
-        mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$Blog"
+      if rexists "$FORK_LX/test/$tree/$sim/fits/simfit_$Blog"; then
+        mkdir -p "$FORK_LOCAL/test/$tree/$sim/fits/simfit_$Blog"
         run --include '*.log' --exclude '*' \
-            "$LX:$FORK_LX/test/$tree/simfit/fits/simfit_$Blog/" \
-            "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$Blog/" || err=1
+            "$LX:$FORK_LX/test/$tree/$sim/fits/simfit_$Blog/" \
+            "$FORK_LOCAL/test/$tree/$sim/fits/simfit_$Blog/" || err=1
       fi
     done
+    # (inside every fit tree the per-variant names stay simfit_<B> /
+    #  fitDiagnostics_simfit_<B>*.root -- the tree dir is the fit's identity)
     local B rfd kind
     for B in lab fb; do
       for kind in "" "_statonly" "_asimov"; do
-        rfd="$FORK_LX/test/$tree/simfit/fits/simfit_$B/fitDiagnostics_simfit_${B}${kind}.root"
+        rfd="$FORK_LX/test/$tree/$sim/fits/simfit_$B/fitDiagnostics_simfit_${B}${kind}.root"
         if rexists "$rfd"; then
-          mkdir -p "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B"
-          run "$LX:$rfd" "$FORK_LOCAL/test/$tree/simfit/fits/simfit_$B/" || err=1
+          mkdir -p "$FORK_LOCAL/test/$tree/$sim/fits/simfit_$B"
+          run "$LX:$rfd" "$FORK_LOCAL/test/$tree/$sim/fits/simfit_$B/" || err=1
         fi
       done
     done
+    done   # sim (the grand fit + the flavfit trees)
   done
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"
 }
@@ -271,16 +259,19 @@ case "$CMD" in
     echo "    # QCD_MODE=abcd, and THREE fits per binning variant --"
     echo "    # nominal + --statonly (the stat error) + --contour (sigma_W as a POI):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
+    echo "    # the mu-only and e-only fits (flavfit: the same model, one flavour each):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both flavfit --asimov"
+    echo "    # or ALL THREE (grand + mu-only + e-only) in one go:"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
     echo "    # backup discriminant, PF MET (defaults to QCD_MODE=lnN):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc met"
-    echo "    # legacy per-flavour pipeline + simfit together:"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all"
-    echo "    # then impacts + covariance plots (pulled by 'download'):"
+    echo "    # then impacts + covariance plots (pulled by 'download'; --fit mu|ele for flavfit):"
     echo "    ./run_pO_impacts.sh --disc leppt_mt40" ;;
   download)
     echo "[sync_lxplus] download done. Next, locally -- ONE command runs the whole"
     echo "observables chain (charge asymmetry, F/B, sigma = r x sigma_gen, and the"
-    echo "(sigma_W, sigma_Z) contour) for that discriminant:"
+    echo "(sigma_W, sigma_Z) contour; + the mu-vs-e overlays when the flavfit trees"
+    echo "exist) for that discriminant:"
     echo "    cd $ANA_LOCAL/analysis"
     echo "    ./run_observables.sh leppt_mt40      # or: met | all"
     echo "Check in its output that the contour came from the scan, not the ellipse:"

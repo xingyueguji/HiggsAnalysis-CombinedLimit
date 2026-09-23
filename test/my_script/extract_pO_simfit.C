@@ -61,8 +61,19 @@
 // consistent with the data (|pull| ~> 1 means kappa too small or template biased).
 // A final sweep prints any floating parameter of fit_s not reported above, so
 // a new nuisance can never be silently invisible.
+// PER-FLAVOUR FITS (2026-09-22, run_pO_fits.sh mode flavfit): the trailing
+//   `flavours` argument ("mu,ele" = the grand fit, default; "mu" or "ele")
+//   names the lepton flavours the fit contains, and `outTag` the prefix of the
+//   three output files ("comb" for the grand fit, as always; "simfit_mu" /
+//   "simfit_ele" for the per-flavour ones). Only the W input files of those
+//   flavours are opened, S sums over them alone (so the yields are that
+//   flavour's), the prefit-S check compares with that many fitted channels,
+//   and the per-flavour QCD reporting (pulls, CR scales, the CSV qcd columns)
+//   covers them alone -- the CSV keeps its 19-column layout, with the absent
+//   flavour's two qcd columns written as 0,0 ("not in this fit").
 //
-// It writes into <outDir> (both variants into the same files):
+// It writes into <outDir> (both variants into the same files; the file names
+// below are for outTag = "comb" -- per-flavour fits use their own prefix):
 //   (a) comb_W_yields.csv -- one row per (charge, binning, y bin): r, rErr,
 //       the mu+e SUMMED prefit signal integral S, and the COMBINED fitted
 //       yield Y = r * S.  With the mu/e-shared r the per-flavour yields are
@@ -85,6 +96,8 @@
 //
 // Usage (run under cmsenv, after run_pO_fits.sh simfit):
 //   root -b -q 'extract_pO_simfit.C("<fitsDir>","<muW.root>","<eleW.root>","<outDir>")'
+// (run_pO_fits.sh passes every argument, incl. flavours/outTag for flavfit;
+//  the W file of a flavour not in the fit may be "none")
 // =============================================================================
 #include "TFile.h"
 #include "TH1D.h"
@@ -265,10 +278,35 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                        double kLumi   = 0.0, //  see qcd_lnn_kappas.txt sidecar)
                        const char *qcdMode = "", // "abcd"|"lnN"|"free"|"" (sidecar
                                                  //  qcdMode line; "" = infer from kappas)
-                       const char *lheSysts = "") // comma list of the LHE shape
+                       const char *lheSysts = "", // comma list of the LHE shape
                                                   //  nuisances in the cards ("" = none)
+                       const char *flavours = "mu,ele", // lepton flavours IN the fit
+                                                        //  (2026-09-22: "mu" | "ele" = flavfit)
+                       const char *outTag = "comb")     // output-file prefix: comb | simfit_mu | simfit_ele
 {
   gSystem->mkdir(outDir, kTRUE);
+
+  // ---- which lepton flavours this fit contains ([0] = mu, [1] = ele) --------
+  bool useFl[2] = {false, false};
+  {
+    TString s(flavours);
+    TObjArray *toks = s.Tokenize(",");
+    for (int i = 0; i < toks->GetEntries(); ++i) {
+      TString t = ((TObjString *)toks->At(i))->GetString();
+      t.ReplaceAll(" ", "");
+      if (t == "mu") useFl[0] = true;
+      else if (t == "ele") useFl[1] = true;
+      else if (t != "") std::cerr << "[extract-simfit] WARN unknown flavour '" << t << "' ignored\n";
+    }
+    delete toks;
+  }
+  const int nFl = (useFl[0] ? 1 : 0) + (useFl[1] ? 1 : 0);
+  if (nFl == 0) {
+    std::cerr << "[extract-simfit] WARN no valid flavour in '" << flavours << "' -- aborting extraction\n";
+    return;
+  }
+  std::cout << "[extract-simfit] fit '" << outTag << "': flavours "
+            << (useFl[0] ? "mu " : "") << (useFl[1] ? "ele" : "") << "\n";
 
   const bool isAbcd = (TString(qcdMode) == "abcd");
   std::vector<TString> lheNames; // the LHE shape nuisances (sidecar lheSysts line)
@@ -287,18 +325,21 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
   // the qcd_model tag stamped on every CSV row (readers pick qcd vs qcd_abcd)
   const char *qModel = isAbcd ? "abcd" : ((kQcdMu > 1.0 || kQcdEle > 1.0) ? "lnN" : "free");
 
-  TFile *wmu = TFile::Open(muWFile, "READ");
-  TFile *wel = TFile::Open(eleWFile, "READ");
-  if (!wmu || wmu->IsZombie() || !wel || wel->IsZombie()) {
+  // the W input files of the flavours IN the fit (a flavour not in it is never
+  // opened -- run_pO_fits.sh passes "none" for it)
+  TFile *wmu = useFl[0] ? TFile::Open(muWFile, "READ") : nullptr;
+  TFile *wel = useFl[1] ? TFile::Open(eleWFile, "READ") : nullptr;
+  if ((useFl[0] && (!wmu || wmu->IsZombie())) || (useFl[1] && (!wel || wel->IsZombie()))) {
     std::cerr << "[extract-simfit] WARN cannot open W input file(s) -- aborting extraction\n";
     return;
   }
+  TFile *wIn[2] = {wmu, wel};
   auto sigPrefit = [&](TFile *fin, const TString &region) -> double {
     TH1 *h = (TH1 *)fin->Get(region + "/signal");
     return h ? h->Integral() : -1.0; // bins 1..N, matches Combine rate convention
   };
 
-  TString yieldsRoot = TString::Format("%s/comb_fitted_yields.root", outDir);
+  TString yieldsRoot = TString::Format("%s/%s_fitted_yields.root", outDir, outTag);
   TFile *fy = TFile::Open(yieldsRoot, "RECREATE");
   auto makeYieldHist = [&](const TString &name, double y, double e) {
     fy->cd(); // OpenFitS opens/closes files in the loop: make fy current first
@@ -314,12 +355,12 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
   // error, from the nominal fit's covariance conditioned on the constrained
   // nuisances (ComputeStatCov); -1 only when fit_s carries no usable covariance.
   // rErr stays the TOTAL (profiled) error; syst = sqrt(rErr^2 - rErr_stat^2).
-  std::ofstream csv(TString::Format("%s/comb_W_yields.csv", outDir).Data());
+  std::ofstream csv(TString::Format("%s/%s_W_yields.csv", outDir, outTag).Data());
   csv << "region,charge,binning,ybin,r,rErr,signal_prefit,fitted_yield,fitted_yield_err,"
          "qcd_norm_mu,qcd_norm_muErr,qcd_norm_ele,qcd_norm_eleErr,r_Z,r_ZErr,lumi,lumiErr,"
          "qcd_model,rErr_stat\n";
 
-  std::ofstream scsv(TString::Format("%s/comb_summary.csv", outDir).Data());
+  std::ofstream scsv(TString::Format("%s/%s_summary.csv", outDir, outTag).Data());
   scsv << "fit,param,value,error,signal_prefit,fitted_yield,fitted_yield_err\n";
 
   const char *charges[2]  = {"Wp", "Wm"};
@@ -435,6 +476,7 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     }
     if (kQcdMu > 1.0 || kQcdEle > 1.0) {
       for (int ifl = 0; ifl < 2; ++ifl) {
+        if (!useFl[ifl]) continue; // flavour not in this fit
         const char *flav = (ifl == 0) ? "mu" : "ele";
         const double kap = (ifl == 0) ? kQcdMu : kQcdEle;
         if (kap <= 1.0) continue;
@@ -456,6 +498,7 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     // Sum_y Int(qcd_abcd) = multiplier x B0*C40/D0.
     if (isAbcd) {
       for (int ifl = 0; ifl < 2; ++ifl) {
+        if (!useFl[ifl]) continue; // flavour not in this fit
         const char *flav = (ifl == 0) ? "mu" : "ele";
         const double kap = (ifl == 0) ? kQcdMu : kQcdEle;
         for (int ic2 = 0; ic2 < 2; ++ic2) {
@@ -552,10 +595,15 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
           const double rel = res[k] / p.e - 1.0;
           if (rel > worstStatGtTot) { worstStatGtTot = rel; worstStatPoi = pois[k]; }
         }
-        const double smu = sigPrefit(wmu, regs[k]), sel = sigPrefit(wel, regs[k]);
-        if (smu < 0 || sel < 0)
-          std::cerr << "[extract-simfit] WARN missing prefit signal for " << regs[k] << "\n";
-        S[k]  = (smu > 0 ? smu : 0) + (sel > 0 ? sel : 0);
+        // S = the prefit signal summed over the flavours IN the fit (both for the
+        // grand fit, that flavour's alone for a per-flavour one)
+        S[k] = 0;
+        for (int jf = 0; jf < 2; ++jf) {
+          if (!useFl[jf]) continue;
+          const double s = sigPrefit(wIn[jf], regs[k]);
+          if (s < 0) std::cerr << "[extract-simfit] WARN missing prefit " << flavs[jf] << " signal for " << regs[k] << "\n";
+          else S[k] += s;
+        }
         ok[k] = p.ok && S[k] > 0;
         // prefit-S check against the fitted channels' saved prefit signal shapes
         // (shapes_prefit/<F>_<C>_<B>_y<i>/signal, present with --saveShapes): the
@@ -563,10 +611,11 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         {
           double sfit = 0; int nf = 0;
           for (int jf = 0; jf < 2; ++jf) {
+            if (!useFl[jf]) continue;
             TH1 *hp = (TH1 *)fd->Get(TString::Format("shapes_prefit/%s_%s_%s_y%d/signal", flavs[jf], charges[ic], B, iy));
             if (hp) { sfit += hp->Integral(); ++nf; }
           }
-          if (nf == 2 && S[k] > 0) maxDS = std::max(maxDS, std::fabs(sfit / S[k] - 1.0));
+          if (nf == nFl && S[k] > 0) maxDS = std::max(maxDS, std::fabs(sfit / S[k] - 1.0));
         }
         rv[k] = p.v; re[k] = p.e;
         if (!p.ok) {
@@ -597,6 +646,10 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                   : (kQcdEle > 1.0)
                       ? LnNScale(fr, kQcdEle, TString::Format("qcd_rate_ele_%s", charges[ic]))
                       : GetPar(fr, TString::Format("qcd_norm_ele_%s", regs[k].Data()));
+        // a flavour not in this fit has no QCD parameter: 0,0 = "not in this fit"
+        // (the helpers would return a plausible-looking 1 for an absent one)
+        if (!useFl[0]) { qmu.v = 0.0; qmu.e = 0.0; }
+        if (!useFl[1]) { qel.v = 0.0; qel.e = 0.0; }
         csv << regs[k] << "," << charges[ic] << "," << B << "," << iy << ","
             << rv[k] << "," << re[k] << "," << S[k] << "," << y << "," << e << ","
             << qmu.v << "," << qmu.e << "," << qel.v << "," << qel.e << ","
@@ -851,8 +904,9 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
 
   csv.close(); scsv.close();
   fy->Close(); delete fy;
-  wmu->Close(); delete wmu;
-  wel->Close(); delete wel;
+  if (wmu) { wmu->Close(); delete wmu; }
+  if (wel) { wel->Close(); delete wel; }
   std::cout << "[extract-simfit] wrote " << yieldsRoot << "\n";
-  std::cout << "[extract-simfit] wrote " << outDir << "/comb_W_yields.csv, comb_summary.csv\n";
+  std::cout << "[extract-simfit] wrote " << outDir << "/" << outTag << "_W_yields.csv, "
+            << outTag << "_summary.csv\n";
 }

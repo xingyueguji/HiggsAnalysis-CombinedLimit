@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_pO_impacts.sh -- nuisance IMPACT plots + fit COVARIANCE/correlation plots
-# for the grand simultaneous fit (simfit).  Run AFTER ./run_pO_fits.sh: it needs
-# each variant's workspace.root (+ fitDiagnostics for the covariance) under
-# pO_fit_out<suffix>/simfit/fits/simfit_{lab,fb}/.
+# for the grand simultaneous fit (simfit) or, with --fit mu|ele, for one of the
+# per-flavour fits (flavfit).  Run AFTER ./run_pO_fits.sh: it needs each
+# variant's workspace.root (+ fitDiagnostics for the covariance) under
+# pO_fit_out<suffix>/<fit dir>/fits/simfit_{lab,fb}/.
 #
 # Impacts (combineTool.py -M Impacts + plotImpacts.py, both SHIPPED with
 # Combine v10 in <fork>/scripts/ -- no CombineHarvester checkout needed):
@@ -17,16 +18,21 @@
 # locally on a downloaded tree, where fitDiagnostics is absent: it then skips
 # the parameter matrix and still draws the yield correlation from summary/):
 #   - full floating-parameter correlation matrix from fit_s (POIs + nuisances)
-#   - the 24x24 fitted-YIELD correlation from summary/comb_fitted_yields.root
+#   - the 24x24 fitted-YIELD correlation from summary/<prefix>_fitted_yields.root
+#     (comb_ for the grand fit, simfit_<flav>_ for the per-flavour ones)
 #     (h_cov_yield / h_cov_yield_FB, the matrices the downstream error
 #      propagation actually uses)
 #
 # Usage (impacts need cmsenv; --cov-only needs only root):
 #   ./run_pO_impacts.sh [--disc met|leppt|leppt_mt40] [--variant lab|fb|both]
+#                       [--fit comb|mu|ele]           (default: comb = the grand fit)
 #                       [--pois "r_Wp_y3 r_Z ..."]    (default: ALL 25 POIs)
 #                       [--impacts-only | --cov-only] [--dry-run]
-# Outputs:  pO_fit_out<suffix>/simfit/impacts/   (json + per-POI PDFs)
-#           pO_fit_out<suffix>/simfit/cov/       (correlation-matrix png+pdf)
+# --fit (2026-09-22) picks the fit: comb = pO_fit_out<suffix>/simfit/, mu / ele
+# = the per-flavour fits of run_pO_fits.sh mode flavfit (simfit_mu/, simfit_ele/;
+# same layout, same 25 POIs, summary file simfit_<flav>_fitted_yields.root).
+# Outputs:  pO_fit_out<suffix>/<fit dir>/impacts/   (json + per-POI PDFs)
+#           pO_fit_out<suffix>/<fit dir>/cov/       (correlation-matrix png+pdf)
 # Both directories are pulled back to the Mac by  ./sync_lxplus.sh download.
 # bash-3.2 safe (macOS stock bash): no associative arrays.
 # =============================================================================
@@ -35,10 +41,11 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-DISC="leppt_mt40"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0
+DISC="leppt_mt40"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0; FIT="comb"
 while [ $# -gt 0 ]; do
   case "$1" in
     --disc)    shift; DISC="${1:-}";;
+    --fit)     shift; FIT="${1:-}";;
     --variant) shift
                case "${1:-both}" in
                  both) VARIANTS="lab fb";;
@@ -49,7 +56,8 @@ while [ $# -gt 0 ]; do
     --impacts-only) DO_COV=0;;
     --cov-only)     DO_IMP=0;;
     --dry-run) DRY=1;;
-    -h|--help) sed -n '2,31p' "$0"; exit 0;;
+    # the WHOLE header, however long it grows (a fixed range truncates it)
+    -h|--help) sed -n '3,/^# ===/p' "$0" | sed '$d'; exit 0;;
     *) echo "[ERROR] unknown option: $1"; exit 1;;
   esac
   shift
@@ -61,7 +69,14 @@ case "$DISC" in
   leppt_mt40) SFX="_leppt_mt40";;
   *) echo "[ERROR] unknown --disc '$DISC' (met|leppt|leppt_mt40)"; exit 1;;
 esac
-SWORK="$HERE/pO_fit_out${SFX}/simfit"
+# the fit: its work dir + the prefix of its summary files (run_pO_fits.sh)
+case "$FIT" in
+  comb) FDIR="simfit";     FPRE="comb";;
+  mu)   FDIR="simfit_mu";  FPRE="simfit_mu";;
+  ele)  FDIR="simfit_ele"; FPRE="simfit_ele";;
+  *) echo "[ERROR] unknown --fit '$FIT' (comb|mu|ele)"; exit 1;;
+esac
+SWORK="$HERE/pO_fit_out${SFX}/$FDIR"
 IMP="$SWORK/impacts"; COV="$SWORK/cov"
 
 # default POI list = the 25 POIs of the simfit model
@@ -83,11 +98,11 @@ for B in $VARIANTS; do
   # ---- impacts --------------------------------------------------------------
   if [ "$DO_IMP" -eq 1 ]; then
     if [ ! -f "$WS" ]; then
-      echo "[skip] impacts $B: no $WS (run ./run_pO_fits.sh --disc $DISC first)"
+      echo "[skip] impacts $B: no $WS (run ./run_pO_fits.sh $([ "$FIT" = comb ] && echo simfit || echo "$FIT flavfit") --disc $DISC first)"
     elif ! command -v combineTool.py >/dev/null 2>&1; then
       echo "[ERROR] combineTool.py not on PATH -- impacts need cmsenv"; err=1
     else
-      echo "== impacts simfit_$B ($DISC) =="
+      echo "== impacts $FDIR/simfit_$B ($DISC) =="
       WD="$IMP/wd_$B"; mkdir -p "$WD"     # contains the many intermediate roots
       JSON="$IMP/impacts_simfit_${B}.json"
       (
@@ -114,9 +129,9 @@ for B in $VARIANTS; do
     if ! command -v root >/dev/null 2>&1; then
       echo "[ERROR] root not on PATH -- covariance plots need it"; err=1
     else
-      echo "== covariance simfit_$B ($DISC) =="
+      echo "== covariance $FDIR/simfit_$B ($DISC) =="
       mkdir -p "$COV"
-      SUMR="$SWORK/summary/comb_fitted_yields.root"
+      SUMR="$SWORK/summary/${FPRE}_fitted_yields.root"
       run root -b -q "$MYS/plot_pO_cov.C(\"$FD\",\"$SUMR\",\"$B\",\"$COV\")" \
         || { echo "[FAIL cov] simfit_$B"; err=1; }
     fi

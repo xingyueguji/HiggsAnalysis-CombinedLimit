@@ -2,32 +2,49 @@
 # =============================================================================
 # run_pO_fits.sh -- end-to-end pO W/Z Combine fits, automated.
 #
-# For each lepton channel (muon / electron) it:
+# For each fit it:
 #   1. locates the structured Combine inputs from the analysis repo
-#        <plots>/combine_input_W.root , <plots>/combine_input_Z.root      (muon)
-#        <plots>/Elec/combine_input_{W,Z}.root                            (electron)
-#   2. generates ALL datacards (per-(charge,y) lab + FB -- each a TWO-channel
-#      card fitted simultaneously with Z_incl -- per-charge incl, W_incl,
-#      Z_incl, and the simultaneous W+Z card).  Two-parameter model: POI 'r'
-#      scales all W-related MC, 'dy_norm' all DY-related MC (shared with the
-#      Z peak in the simultaneous cards), 'qcd_norm' the data-driven QCD.
-#      [make_pO_datacards.sh]
-#   3. runs text2workspace + combine -M FitDiagnostics per region, each in its
-#      own clean output subdir
-#   4. extracts fitted signal yields -> CSV + h_mt_W{p,m}_y{..}(_FB) histograms
-#      that analysis/charge_asym.C and analysis/FBratio.C read directly
-#      [extract_pO_yields.C]
+#        <plots>/combine_input_W<disc>.root , <plots>/combine_input_Z.root      (muon)
+#        <plots>/Elec/combine_input_{W<disc>,Z}.root                            (electron)
+#      and copies them (+ their *_systs.txt sidecars) into the fit's work dir
+#   2. writes the datacard + multiSignalModel maps per binning variant (lab, fb)
+#      [my_script/make_pO_simfit_cards.sh]
+#   3. runs text2workspace + combine -M FitDiagnostics (+ the --statonly
+#      companion, the --contour scan, and the --asimov closure when asked)
+#   4. extracts POIs, fitted yields, the stat/syst split and the covariances
+#      [my_script/extract_pO_simfit.C]
 #   5. draws postfit data/MC plots in the SAME cosmetics as plotting/mtandmet.C
-#      [draw_postfit_pO.C]
+#      [my_script/draw_postfit_pO.C]
 #
-# Output tree (clean, one dir per region):
-#   pO_fit_out/<chan>/{combine_input_*.root, datacards/, fits/<region>/,
-#                      postfit/, summary/<chan>_W_yields.csv,
-#                      <chan>_summary.csv, <chan>_fitted_yields.root}
+# Output tree, one work dir per fit (the grand fit and each per-flavour fit):
+#   pO_fit_out<suffix>/<fit>/{combine_input_*.root, datacards/, fits/simfit_<B>/,
+#                             contour/contour_<B>/, postfit/, summary/}
+#   <fit> = simfit (grand, files comb_*) | simfit_mu | simfit_ele (files simfit_<flav>_*)
+#
+# The LEGACY per-flavour per-bin pipeline (modes perbin/incl/combined:
+# 48 separate two-channel cards per flavour, the old r + dy_norm + free
+# qcd_norm model with no systematics) was REMOVED on 2026-09-22 (user
+# decision) -- flavfit is the per-flavour fit now.
 #
 # Usage:
-#   ./run_pO_fits.sh [mu|ele|both] [perbin|incl|combined|simfit|all] [options]
+#   ./run_pO_fits.sh [mu|ele|both] [simfit|flavfit|all] [options]
 #     channel  (default both)   mode (default simfit)
+#     all = the grand simfit + BOTH per-flavour fits, in one go
+#
+#   Mode 'flavfit' (2026-09-22) = the PER-FLAVOUR SIMULTANEOUS FITS: the simfit
+#   model below restricted to ONE lepton flavour -- that flavour's 24 W channels
+#   + its own Z peak (+ its 6 ABCD control regions) in one likelihood per
+#   binning variant, 25 POIs (r_<C>_y<i> + r_Z fitted by that flavour ALONE),
+#   and EXACTLY the grand fit's treatment otherwise: the same nuisances where
+#   they act on that flavour (lumi, its QCD lnN rows, the LHE shapes, muSF in
+#   the muon fit only), the same three passes (nominal + --statonly companion =
+#   the stat error + --contour scan), --asimov closure, extraction with the
+#   stat/syst split and the 25x25 POI covariance, postfit plots. One fit per
+#   flavour of the channel argument (both -> mu AND ele, run one after the
+#   other); outputs under <out>/simfit_mu/ and <out>/simfit_ele/, summary files
+#   simfit_<flav>_{W_yields.csv,summary.csv,fitted_yields.root}. The point:
+#   compare mu with e (analysis/run_observables.sh overlays them) while the
+#   electron SFs are not applied -- the grand fit forces one r on both.
 #
 #   Mode 'simfit' (2026-08-04, the DEFAULT) = the GRAND SIMULTANEOUS FIT: all 48 (flavour,
 #   charge, y-bin) W channels + BOTH Z peaks in ONE likelihood per binning
@@ -51,11 +68,9 @@
 #   templates the inputs carry (env LHE_SYST=auto|off|list -> the card
 #   generator; the inputs' *_systs.txt sidecars travel with the copies).
 #   Cross-flavour by construction, so the channel
-#   argument is ignored (mode 'all' runs simfit only when channel = both).
+#   argument is ignored (mode 'all' runs simfit only when channel = both; a
+#   single-flavour fit is mode 'flavfit').
 #   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
-#   The legacy per-bin pipeline (perbin/incl/combined) is UNCHANGED and stays
-#   runnable for comparison (it refits the same Z data in every per-bin card);
-#   mode 'all' = the full legacy per-flavour pipeline PLUS simfit.
 #   options:
 #     --disc met|leppt|leppt_mt40
 #                       W discriminant (default leppt_mt40 = the PRIMARY one;
@@ -73,9 +88,9 @@
 #     --no-postfit      skip the postfit plots (faster)
 #     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
 #                       use after cosmetic changes to draw_postfit_pO.C)
-#     --asimov          (simfit only) also run a prefit-Asimov closure fit per
+#     --asimov          (simfit/flavfit) also run a prefit-Asimov closure fit per
 #                       variant (-t -1): every fitted POI must come back at 1
-#     --no-statonly     (simfit only) SKIP the frozen-nuisance companion fit.
+#     --no-statonly     (simfit/flavfit) SKIP the frozen-nuisance companion fit.
 #                       It is ON by default (2026-09-15b) and is THE source of
 #                       the quoted statistical error: all constrained nuisances
 #                       frozen at their post-fit values, so the POI errors that
@@ -84,7 +99,7 @@
 #                       extractor fall back to the conditioned covariance of the
 #                       nominal fit (Gaussian-exact, no extra fit) -- which it
 #                       computes either way, as the cross-check.
-#     --no-contour      (simfit only) SKIP the profiled (sigma_W, sigma_Z) scan.
+#     --no-contour      (simfit/flavfit) SKIP the profiled (sigma_W, sigma_Z) scan.
 #                       ON by default (2026-09-15b). ADDITIVE: same datacard, an
 #                       extra map file that promotes the rapidity-inclusive
 #                       sigma_W to a POI, its own workspace and its own output
@@ -92,7 +107,7 @@
 #                       the nominal fit and the extraction never reads it.
 #                       Needs skim/output/gen_xsec_fid.txt; missing -> the pass
 #                       is skipped with a WARN, the other two still run.
-#     --extract-only    (simfit only) re-run ONLY the extraction on an EXISTING
+#     --extract-only    (simfit/flavfit) re-run ONLY the extraction on an EXISTING
 #                       fits/ tree (no combine; e.g. on a downloaded fit after an
 #                       extractor change). Prefit integrals from the input copies
 #                       in the work dir, else from the analysis plots dir -- the
@@ -103,7 +118,7 @@
 # Needs `cmsenv` (combine + text2workspace.py on PATH) for the actual fits.
 # bash-3.2 safe (macOS stock bash): no associative arrays.
 # =============================================================================
-set -uo pipefail   # NOT -e: per-bin fit failures must not abort the whole loop
+set -uo pipefail   # NOT -e: one failed fit/pass must not abort the other fits
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
@@ -123,8 +138,12 @@ PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/use
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    mu|ele|both)                      CHAN_ARG="$1" ;;
-    perbin|incl|combined|simfit|all)  MODE="$1" ;;
+    mu|ele|both)               CHAN_ARG="$1" ;;
+    simfit|flavfit|all)        MODE="$1" ;;
+    perbin|incl|combined)
+      echo "[ERROR] mode '$1' belonged to the legacy per-flavour per-bin pipeline, REMOVED 2026-09-22."
+      echo "        The per-flavour fit is now:  ./run_pO_fits.sh [mu|ele|both] flavfit"
+      exit 1 ;;
     --dry-run)                 DRYRUN=1 ;;
     --no-postfit)              DO_POSTFIT=0 ;;
     --draw-only)               DRAWONLY=1 ;;
@@ -152,7 +171,7 @@ case "$DISC" in
 esac
 YT="Events / 2.0 GeV"   # MET and lepton-pT templates are both 2 GeV bins
 WINNAME="combine_input_W${DSUF}.root"
-# legacy output path for met; suffixed tree for the variants (unless --out given)
+# unsuffixed out-tree for met (its historical name); suffixed tree for the variants (unless --out given)
 if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
 
 # ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
@@ -193,133 +212,6 @@ if { [ "$DRAWONLY" -eq 1 ] || [ "$EXTRACTONLY" -eq 1 ]; } && ! command -v root >
   echo "[ERROR] --draw-only / --extract-only need root on PATH."; exit 3
 fi
 
-# ---- region list for a mode -------------------------------------------------
-build_regions() {  # echoes space-separated region labels (excludes the WZ combo)
-  m="$1"; out=""
-  if [ "$m" = "perbin" ] || [ "$m" = "all" ]; then
-    for C in Wp Wm; do for B in lab fb; do for iy in $(seq 0 11); do out="$out ${C}_${B}_y${iy}"; done; done; done
-  fi
-  if [ "$m" = "incl" ] || [ "$m" = "all" ]; then
-    out="$out Wp_incl Wm_incl W_incl Z_incl"
-  fi
-  echo "$out"
-}
-want_combined() { [ "$1" = "combined" ] || [ "$1" = "all" ]; }
-
-# ---- one fit region: datacard -> workspace -> FitDiagnostics ----------------
-fit_region() {  # $1 = region label, $2 = fits base dir, $3 = datacards dir
-  R="$1"; FITS="$2"; DCD="$3"
-  card="$DCD/datacard_${R}.txt"
-  if [ ! -f "$card" ]; then echo "  [skip] no datacard for $R"; return; fi
-  RD="$FITS/$R"; mkdir -p "$RD"
-  (
-    cd "$RD" || exit 1
-    text2workspace.py "$card" -o workspace.root >t2w.log 2>&1 || { echo "  [FAIL t2w] $R (see $RD/t2w.log)"; exit 1; }
-    combine -M FitDiagnostics workspace.root \
-            --saveShapes --saveWithUncertainties \
-            -n "_${R}" --rMin 0 --rMax 20 \
-            --cminDefaultMinimizerStrategy 0 >fit.log 2>&1 \
-      || { echo "  [FAIL fit] $R (see $RD/fit.log)"; exit 1; }
-  ) && echo "  [ok] $R"
-}
-
-# ---- postfit plot for a region ---------------------------------------------
-postfit_region() {  # $1=region(label/fitChannel) $2=fits $3=post $4=absW $5=absZ $6=chlabel $7=zlabel
-  R="$1"; FITS="$2"; POST="$3"; AW="$4"; AZ="$5"; WL="$6"; ZL="$7"
-  fd="$FITS/$R/fitDiagnostics_${R}.root"
-  [ -f "$fd" ] || return
-  case "$R" in
-    Z_incl)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Z_incl\",\"$AZ\",\"Z_incl\",\"$POST/$R\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"$R (postfit)\",false)" >/dev/null 2>&1 ;;
-    WZ)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Wincl\",\"$AW\",\"W_incl\",\"$POST/WZ_Wincl\",\"$XT\",\"$YT\",\"$WL\",\"W+Z fit (postfit)\",true)"  >/dev/null 2>&1
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"Zincl\",\"$AZ\",\"Z_incl\",\"$POST/WZ_Zincl\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"W+Z fit (postfit)\",false)" >/dev/null 2>&1 ;;
-    *)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$R\",\"$AW\",\"$R\",\"$POST/$R\",\"$XT\",\"$YT\",\"$WL\",\"$R (postfit)\",true)" >/dev/null 2>&1 ;;
-  esac
-}
-
-# ---- one channel ------------------------------------------------------------
-run_channel() {
-  chan="$1"
-  if [ "$chan" = "ele" ]; then
-    WIN_SRC="$PO_PLOTS/Elec/$WINNAME"; ZIN_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
-    WL="W #rightarrow e #nu"; ZL="Z #rightarrow e e"
-  else
-    WIN_SRC="$PO_PLOTS/$WINNAME"; ZIN_SRC="$PO_PLOTS/combine_input_Z.root"
-    WL="W #rightarrow #mu #nu"; ZL="Z #rightarrow #mu #mu"
-  fi
-  echo ""
-  echo "================ channel: $chan ================"
-  WORK="$OUTROOT/$chan"; DCD="$WORK/datacards"; FITS="$WORK/fits"; POST="$WORK/postfit"; SUMM="$WORK/summary"
-  ABS_W="$WORK/combine_input_W.root"; ABS_Z="$WORK/combine_input_Z.root"
-
-  # ---- draw-only: redraw postfit plots from an EXISTING fit run --------------
-  # Reuses the work-dir input copies (physical axes) + fits/<region>/ from the
-  # previous run; regenerates nothing else.
-  if [ "$DRAWONLY" -eq 1 ]; then
-    if [ ! -f "$ABS_W" ]; then
-      echo "[ERROR] $ABS_W missing -- no previous fit run for '$chan' (run the full pipeline first)."
-      return
-    fi
-    nfd=$(find "$FITS" -name 'fitDiagnostics_*.root' 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$nfd" -eq 0 ]; then
-      echo "[ERROR] no fitDiagnostics_*.root under $FITS -- --draw-only needs the fits/"
-      echo "        tree from an earlier run (NB 'sync_lxplus.sh download' does NOT pull fits/;"
-      echo "        redraw where the fits ran, then download --postfit)."
-      return
-    fi
-    mkdir -p "$POST"
-    REGIONS="$(build_regions "$MODE")"
-    echo "[draw-only] $nfd fit result(s) under fits/; redrawing $(echo $REGIONS | wc -w | tr -d ' ') region(s) + combined: $(want_combined "$MODE" && echo yes || echo no) ..."
-    for R in $REGIONS; do postfit_region "$R" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; done
-    if want_combined "$MODE" && [ -f "$ABS_Z" ]; then postfit_region "WZ" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; fi
-    echo "[done] $chan -> $POST"
-    return
-  fi
-
-  if [ ! -f "$WIN_SRC" ]; then echo "[ERROR] missing $WIN_SRC"; return; fi
-  if [ ! -f "$ZIN_SRC" ]; then echo "[WARN] missing $ZIN_SRC (Z + combined fits will be skipped)"; fi
-
-  mkdir -p "$WORK" "$DCD" "$FITS" "$POST" "$SUMM"
-  cp -f "$WIN_SRC" "$WORK/combine_input_W.root"
-  [ -f "$ZIN_SRC" ] && cp -f "$ZIN_SRC" "$WORK/combine_input_Z.root"
-
-  # absolute-path datacards so combine resolves shapes from any CWD
-  /bin/bash "$MYS/make_pO_datacards.sh" "$ABS_W" "$ABS_Z" "$DCD" "$DISC"
-
-  if [ "$DRYRUN" -eq 1 ]; then
-    echo "[dry-run] datacards in $DCD ; skipping fits."
-    return
-  fi
-
-  REGIONS="$(build_regions "$MODE")"
-  echo "[fit] regions: $(echo $REGIONS | wc -w) ; combined: $(want_combined "$MODE" && echo yes || echo no)"
-  for R in $REGIONS; do fit_region "$R" "$FITS" "$DCD"; done
-  if want_combined "$MODE" && [ -f "$ABS_Z" ]; then fit_region "WZ" "$FITS" "$DCD"; fi
-
-  # ---- extract machine-readable yields + analysis histos ----
-  if command -v root >/dev/null 2>&1; then
-    root -b -q "$MYS/extract_pO_yields.C(\"$chan\",\"$FITS\",\"$ABS_W\",\"$ABS_Z\",\"$SUMM\")" 2>&1 \
-      | tee "$SUMM/extract_${chan}.log" | grep -E "\[extract\]|WARN" || true
-  fi
-
-  # ---- postfit plots ----
-  if [ "$DO_POSTFIT" -eq 1 ] && command -v root >/dev/null 2>&1; then
-    echo "[postfit] drawing ..."
-    for R in $REGIONS; do postfit_region "$R" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; done
-    if want_combined "$MODE" && [ -f "$ABS_Z" ]; then postfit_region "WZ" "$FITS" "$POST" "$ABS_W" "$ABS_Z" "$WL" "$ZL"; fi
-  fi
-
-  echo "[done] $chan -> $WORK"
-  echo "       yields CSV : $SUMM/${chan}_W_yields.csv"
-  echo "       summary    : $SUMM/${chan}_summary.csv"
-  echo "       analysis in: $SUMM/${chan}_fitted_yields.root"
-  echo "       -> feed analysis macros, e.g.:"
-  echo "          charge_asym(\"$SUMM/${chan}_fitted_yields.root\")"
-  echo "          FBratio(\"$SUMM/${chan}_fitted_yields.root\")"
-}
-
 # =============================================================================
 # simfit -- the GRAND SIMULTANEOUS FIT (2026-08-04).  ONE likelihood per
 # binning variant (lab / fb): 48 W channels ({mu,ele} x {Wp,Wm} x y0..11) +
@@ -327,7 +219,15 @@ run_channel() {
 # QCD lnN per (flavour, charge) + global lumi lnN (2026-08-17; QCD_MODE=free
 # restores per-channel free qcd_norm), w/wtau under Z frozen -- see
 # my_script/make_pO_simfit_cards.sh for the model definition (card + t2w maps).
-# Cross-flavour by construction, so it lives OUTSIDE run_channel().
+#
+# The SAME functions run the per-flavour fits (mode flavfit, 2026-09-22):
+# run_simfit_set "<flavours>" sets the work dir and the flavour list they all
+# read -- "mu ele" -> simfit/ (the grand fit, comb_* files), mu -> simfit_mu/,
+# ele -> simfit_ele/ (simfit_<flav>_* files). Nothing else differs, which is
+# the point: the per-flavour results get exactly the grand fit's treatment.
+# Globals set there: SFLAVS (space list), SFLAVS_CSV, SNAME (work-dir name),
+# STAG (summary-file prefix), SWORK/SDCD/SFITS/SPOST/SSUMM/SCONT, and the input
+# copies AWMU/AZMU/AWEL/AZEL ("none" for a flavour not in the fit).
 # =============================================================================
 
 fit_simfit() {  # $1 = lab | fb : workspace (multiSignalModel) + FitDiagnostics
@@ -470,7 +370,7 @@ fit_contour() {  # $1 = lab | fb
   ) && echo "  [ok] contour_$B"
 }
 
-simfit_extract() {  # POIs + mu+e-combined yields + covariance -> $SSUMM (root only)
+simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covariance -> $SSUMM (root only)
   # lnN kappas + qcd mode the cards were built with (sidecar from
   # make_pO_simfit_cards.sh; missing sidecar / 0 entries -> legacy
   # free-rateParam extraction path; missing qcdMode line -> legacy sidecar,
@@ -486,6 +386,13 @@ simfit_extract() {  # POIs + mu+e-combined yields + covariance -> $SSUMM (root o
     QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
     LHES=$(awk '$1=="lheSysts"{print $2}' "$KF"); LHES="${LHES:-}"
     [ "$LHES" = "none" ] && LHES=""
+    # flavours (2026-09-22): the cards must be the ones of THIS tree (a sidecar
+    # without the line predates per-flavour fits = the grand mu,ele card)
+    KFL=$(awk '$1=="flavours"{print $2}' "$KF"); KFL="${KFL:-mu,ele}"
+    if [ "$KFL" != "$SFLAVS_CSV" ]; then
+      echo "[extract] WARN the cards' sidecar says flavours '$KFL' but this is the $SNAME tree ($SFLAVS_CSV)"
+      echo "          -- cards from another fit in this work dir? The extraction uses $SFLAVS_CSV."
+    fi
   else
     echo "[extract] WARN no sidecar $KF -- legacy (free-rateParam) extraction assumed"
   fi
@@ -496,14 +403,16 @@ simfit_extract() {  # POIs + mu+e-combined yields + covariance -> $SSUMM (root o
     # without this they only ever exist in that terminal. summary/ is downloaded
     # wholesale, so the log travels with the results. (Repo convention: if a stage
     # produces numbers anyone quotes, it gets a log.)
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\")" 2>&1 \
-      | tee "$SSUMM/extract_simfit.log" \
+    # (log named after the work dir: extract_simfit.log for the grand fit, as
+    #  before; extract_simfit_<flav>.log for the per-flavour ones)
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\")" 2>&1 \
+      | tee "$SSUMM/extract_${SNAME}.log" \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
-    echo "[extract] full log: $SSUMM/extract_simfit.log"
+    echo "[extract] full log: $SSUMM/extract_${SNAME}.log"
   fi
 }
 
-simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both variants
+simfit_postfit_all() {  # postfit data/MC per channel of the fit ($SFLAVS), both variants
   # QCD info-box param: lnN mode (2026-08-17 default) -> the shared per
   # (flavour, charge) nuisance qcd_rate_<F>_<C>, whose displayed value is the
   # PULL theta (scale = kappa^theta); free mode -> the per-channel qcd_norm.
@@ -515,7 +424,7 @@ simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both var
   for B in lab fb; do
     fd="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
     [ -f "$fd" ] || continue
-    for F in mu ele; do
+    for F in $SFLAVS; do
       if [ "$F" = "ele" ]; then AW="$AWEL"; AZ="$AZEL"; WL="W #rightarrow e #nu"; ZL="Z #rightarrow e e"
       else                      AW="$AWMU"; AZ="$AZMU"; WL="W #rightarrow #mu #nu"; ZL="Z #rightarrow #mu #mu"; fi
       for C in Wp Wm; do
@@ -525,27 +434,43 @@ simfit_postfit_all() {  # postfit data/MC per channel of the grand fit, both var
           # info box: this bin's POI, the global r_Z (shown as DY norm), the QCD
           # param (lnN mode: the shared nuisance -> value shown is the PULL);
           # ndf uses the ~3 params that shape this channel.
-          root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (simfit postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"$QN\",3)" >/dev/null 2>&1
+          root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (${SNAME} postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"$QN\",3)" >/dev/null 2>&1
         done
       done
       # the Z peak as seen by this variant's grand fit (r_Z only; W bkg frozen)
-      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"${F}_Z_incl\",\"$AZ\",\"Z_incl\",\"$SPOST/${F}_Z_incl_${B}\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"Z incl (simfit ${B} postfit)\",false,\"r_Z\",\"none\",\"none\",1)" >/dev/null 2>&1
+      root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"${F}_Z_incl\",\"$AZ\",\"Z_incl\",\"$SPOST/${F}_Z_incl_${B}\",\"m_{ll} (GeV)\",\"Events / 1.0 GeV\",\"$ZL\",\"Z incl (${SNAME} ${B} postfit)\",false,\"r_Z\",\"none\",\"none\",1)" >/dev/null 2>&1
     done
   done
 }
 
-run_simfit() {
+run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu | ele (flavfit)
+  SFLAVS="$1"
+  case "$SFLAVS" in
+    "mu ele") SNAME="simfit";     STAG="comb"
+              STITLE="simfit: grand simultaneous fit (mu + ele)" ;;
+    mu)       SNAME="simfit_mu";  STAG="simfit_mu"
+              STITLE="simfit_mu: MUON-ONLY simultaneous fit (flavfit)" ;;
+    ele)      SNAME="simfit_ele"; STAG="simfit_ele"
+              STITLE="simfit_ele: ELECTRON-ONLY simultaneous fit (flavfit)" ;;
+    *)        echo "[ERROR] run_simfit_set: unknown flavour set '$SFLAVS'"; return ;;
+  esac
+  SFLAVS_CSV=$(echo "$SFLAVS" | tr ' ' ',')
   echo ""
-  echo "================ simfit: grand simultaneous fit (mu + ele) ================"
-  SWORK="$OUTROOT/simfit"; SDCD="$SWORK/datacards"; SFITS="$SWORK/fits"; SPOST="$SWORK/postfit"; SSUMM="$SWORK/summary"
+  echo "================ $STITLE ================"
+  SWORK="$OUTROOT/$SNAME"; SDCD="$SWORK/datacards"; SFITS="$SWORK/fits"; SPOST="$SWORK/postfit"; SSUMM="$SWORK/summary"
   SCONT="$SWORK/contour"
-  AWMU="$SWORK/combine_input_W_mu.root";  AZMU="$SWORK/combine_input_Z_mu.root"
-  AWEL="$SWORK/combine_input_W_ele.root"; AZEL="$SWORK/combine_input_Z_ele.root"
+  # input copies of the flavours IN the fit; "none" for the other one (neither
+  # the card generator nor the extractor reads it)
+  AWMU="none"; AZMU="none"; AWEL="none"; AZEL="none"
+  case " $SFLAVS " in *" mu "*)  AWMU="$SWORK/combine_input_W_mu.root";  AZMU="$SWORK/combine_input_Z_mu.root" ;; esac
+  case " $SFLAVS " in *" ele "*) AWEL="$SWORK/combine_input_W_ele.root"; AZEL="$SWORK/combine_input_Z_ele.root" ;; esac
 
   # ---- draw-only: redraw simfit postfit plots from an EXISTING run -----------
   if [ "$DRAWONLY" -eq 1 ]; then
-    if [ ! -f "$AWMU" ] || [ ! -f "$AWEL" ]; then
-      echo "[ERROR] $SWORK input copies missing -- no previous simfit run (run the full simfit first)."
+    miss=0
+    for f in "$AWMU" "$AWEL"; do [ "$f" = none ] || [ -f "$f" ] || miss=1; done
+    if [ "$miss" -eq 1 ]; then
+      echo "[ERROR] $SWORK input copies missing -- no previous $SNAME run (run the full fit first)."
       return
     fi
     nfd=$(find "$SFITS" -name 'fitDiagnostics_simfit_*.root' 2>/dev/null | wc -l | tr -d ' ')
@@ -555,9 +480,9 @@ run_simfit() {
       return
     fi
     mkdir -p "$SPOST"
-    echo "[draw-only] redrawing simfit postfit plots ..."
+    echo "[draw-only] redrawing $SNAME postfit plots ..."
     simfit_postfit_all
-    echo "[done] simfit -> $SPOST"
+    echo "[done] $SNAME -> $SPOST"
     return
   fi
 
@@ -573,12 +498,12 @@ run_simfit() {
       echo "        run here (or 'sync_lxplus.sh download')."
       return
     fi
-    if [ ! -f "$AWMU" ]; then
+    if [ "$AWMU" != none ] && [ ! -f "$AWMU" ]; then
       if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/$WINNAME" ]; then
         AWMU="$PO_PLOTS/$WINNAME"; echo "[extract-only] no muon W input copy in $SWORK -> $AWMU"
       else echo "[ERROR] --extract-only: no muon W input (neither a work-dir copy nor the plots dir)"; return; fi
     fi
-    if [ ! -f "$AWEL" ]; then
+    if [ "$AWEL" != none ] && [ ! -f "$AWEL" ]; then
       if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/Elec/$WINNAME" ]; then
         AWEL="$PO_PLOTS/Elec/$WINNAME"; echo "[extract-only] no electron W input copy in $SWORK -> $AWEL"
       else echo "[ERROR] --extract-only: no electron W input (neither a work-dir copy nor the plots dir)"; return; fi
@@ -586,18 +511,19 @@ run_simfit() {
     mkdir -p "$SSUMM"
     echo "[extract-only] re-extracting from $SFITS ..."
     simfit_extract
-    echo "[done] extract-only -> $SSUMM/comb_W_yields.csv (+ comb_summary.csv, comb_fitted_yields.root)"
+    echo "[done] extract-only -> $SSUMM/${STAG}_W_yields.csv (+ ${STAG}_summary.csv, ${STAG}_fitted_yields.root)"
     return
   fi
 
   WMU_SRC="$PO_PLOTS/$WINNAME";      ZMU_SRC="$PO_PLOTS/combine_input_Z.root"
   WEL_SRC="$PO_PLOTS/Elec/$WINNAME"; ZEL_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
   miss=0
-  for f in "$WMU_SRC" "$ZMU_SRC" "$WEL_SRC" "$ZEL_SRC"; do
-    [ -f "$f" ] || { echo "[ERROR] simfit input missing: $f"; miss=1; }
+  for pair in "$AWMU|$WMU_SRC" "$AZMU|$ZMU_SRC" "$AWEL|$WEL_SRC" "$AZEL|$ZEL_SRC"; do
+    [ "${pair%%|*}" = none ] && continue          # flavour not in this fit
+    [ -f "${pair#*|}" ] || { echo "[ERROR] $SNAME input missing: ${pair#*|}"; miss=1; }
   done
   if [ "$miss" -eq 1 ]; then
-    echo "[ERROR] simfit needs BOTH flavours' W AND Z inputs (no Z fallback: r_Z is pinned by the peaks) -- skipped."
+    echo "[ERROR] $SNAME needs the W AND Z inputs of every flavour it fits (no Z fallback: r_Z is pinned by the peak) -- skipped."
     return
   fi
 
@@ -625,62 +551,65 @@ run_simfit() {
   # LHE shape-systematics sidecars (2026-09-07, <input minus .root>_systs.txt):
   # travel with the inputs so the card generator finds them next to the copies
   # (absent -> no shape rows; a stale copy is removed so it cannot lie).
+  # (only the flavours in the fit: a per-flavour work dir holds one flavour's
+  #  inputs, so nothing of the other can leak into its cards)
   for pair in "$WMU_SRC|$AWMU" "$ZMU_SRC|$AZMU" "$WEL_SRC|$AWEL" "$ZEL_SRC|$AZEL"; do
     psrc="${pair%%|*}"; pdst="${pair##*|}"
+    [ "$pdst" = none ] && continue
     if [ -f "${psrc%.root}_systs.txt" ]; then cp -f "${psrc%.root}_systs.txt" "${pdst%.root}_systs.txt"
     else rm -f "${pdst%.root}_systs.txt"; fi
+    cp -f "$psrc" "$pdst"
   done
-  cp -f "$WMU_SRC" "$AWMU"; cp -f "$ZMU_SRC" "$AZMU"
-  cp -f "$WEL_SRC" "$AWEL"; cp -f "$ZEL_SRC" "$AZEL"
 
   # absolute-path datacards so combine resolves shapes from any CWD.
   # The generator can refuse (e.g. QCD_MODE=abcd with a non-leppt_mt40 disc);
   # the script runs without -e, so check explicitly or the fit stage would run
-  # on stale/absent cards.
-  if ! /bin/bash "$MYS/make_pO_simfit_cards.sh" "$AWMU" "$AZMU" "$AWEL" "$AZEL" "$SDCD" "$DISC"; then
-    echo "[ERROR] simfit datacard generation failed -- simfit skipped."
+  # on stale/absent cards. SIMFIT_FLAVS restricts the card to this fit's
+  # flavours (the grand card is byte-identical to the pre-2026-09-22 one).
+  if ! SIMFIT_FLAVS="$SFLAVS" /bin/bash "$MYS/make_pO_simfit_cards.sh" "$AWMU" "$AZMU" "$AWEL" "$AZEL" "$SDCD" "$DISC"; then
+    echo "[ERROR] $SNAME datacard generation failed -- $SNAME skipped."
     return
   fi
 
   if [ "$DRYRUN" -eq 1 ]; then
-    echo "[dry-run] simfit datacards + t2w maps in $SDCD ; skipping fits."
+    echo "[dry-run] $SNAME datacards + t2w maps in $SDCD ; skipping fits."
     return
   fi
 
   for B in lab fb; do fit_simfit "$B"; done
   if [ "$CONTOUR" -eq 1 ]; then for B in lab fb; do fit_contour "$B"; done; fi
 
-  # ---- extract POIs + mu+e-combined yields + covariance (simfit_extract) ----
+  # ---- extract POIs + yields (summed over the fit's flavours) + covariance ----
   simfit_extract
 
-  # ---- postfit plots (per channel of the grand fit: 2 variants x 50) ----
+  # ---- postfit plots (per channel of the fit: 2 variants x 25 per flavour) ----
   if [ "$DO_POSTFIT" -eq 1 ] && command -v root >/dev/null 2>&1; then
-    echo "[postfit] drawing simfit postfit plots (2 variants x 50 channels) ..."
+    echo "[postfit] drawing $SNAME postfit plots (2 variants x 25 channels per flavour: $SFLAVS) ..."
     simfit_postfit_all
   fi
 
-  echo "[done] simfit -> $SWORK"
-  echo "       combined yields CSV : $SSUMM/comb_W_yields.csv"
-  echo "       POI summary         : $SSUMM/comb_summary.csv"
-  echo "       analysis input      : $SSUMM/comb_fitted_yields.root  (+ h_cov_yield[_FB])"
-  echo "       -> feed analysis macros, e.g.:"
-  echo "          charge_asym(\"$SSUMM/comb_fitted_yields.root\")"
-  echo "          FBratio(\"$SSUMM/comb_fitted_yields.root\")"
+  echo "[done] $SNAME -> $SWORK"
+  echo "       yields CSV     : $SSUMM/${STAG}_W_yields.csv"
+  echo "       POI summary    : $SSUMM/${STAG}_summary.csv"
+  echo "       analysis input : $SSUMM/${STAG}_fitted_yields.root  (+ h_cov_yield[_FB], h_cov_poi[_FB])"
+  echo "       -> the observables chain for this discriminant, locally:"
+  echo "          (analysis repo) analysis/run_observables.sh $DISC"
 }
 
 case "$CHAN_ARG" in
   both) CHANS="mu ele" ;;
   *)    CHANS="$CHAN_ARG" ;;
 esac
-if [ "$MODE" != "simfit" ]; then
-  for c in $CHANS; do run_channel "$c"; done
-fi
-if [ "$MODE" = "simfit" ]; then
-  [ "$CHAN_ARG" != "both" ] && echo "[note] simfit always uses BOTH flavours; channel arg '$CHAN_ARG' ignored."
-  run_simfit
-elif [ "$MODE" = "all" ]; then
-  if [ "$CHAN_ARG" = "both" ]; then run_simfit
-  else echo "[note] mode 'all' with channel '$CHAN_ARG': simfit needs both flavours -> skipped."; fi
-fi
+case "$MODE" in
+  simfit)    # the grand fit, mu + e in one likelihood
+    [ "$CHAN_ARG" != "both" ] && echo "[note] simfit is the mu+e GRAND fit -- channel '$CHAN_ARG' ignored (a $CHAN_ARG-only fit: ./run_pO_fits.sh $CHAN_ARG flavfit)."
+    run_simfit_set "mu ele" ;;
+  flavfit)   # one simultaneous fit per flavour of the channel argument
+    for c in $CHANS; do run_simfit_set "$c"; done ;;
+  all)       # every fit: the grand fit + the per-flavour fits
+    if [ "$CHAN_ARG" = "both" ]; then run_simfit_set "mu ele"
+    else echo "[note] mode 'all' with channel '$CHAN_ARG': the grand simfit needs both flavours -> skipped ($CHAN_ARG flavfit still runs)."; fi
+    for c in $CHANS; do run_simfit_set "$c"; done ;;
+esac
 echo ""
 echo "[run_pO_fits] all done. Output under: $OUTROOT"
