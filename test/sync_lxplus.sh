@@ -28,6 +28,15 @@
 #                                     #  conditioned cross-check and the Asimov
 #                                     #  closure, which live nowhere else)
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
+#   ./sync_lxplus.sh upload-idiso     # the ELECTRON ID+ISO SF study (2026-09-25), a
+#                                     # SEPARATE stream: its inputs (the analysis
+#                                     # repo's correction/rootfile/idiso_sf_ele/)
+#                                     # + run_pO_idiso_sf.sh and its two scripts.
+#                                     # upload / download never touch it.
+#   ./sync_lxplus.sh download-idiso   # pull test/pO_idiso_sf_out/ (summary CSVs +
+#                                     # extraction logs, cards as fitted, combine
+#                                     # logs, fitDiagnostics; --postfit adds the
+#                                     # postfit plots; never the workspaces)
 # Options (any command):
 #   --chan mu|ele   restrict to one channel (default: both; also selects which
 #                   flavfit tree, simfit_mu/ or simfit_ele/, is downloaded)
@@ -238,12 +247,58 @@ download_results() {
   [ "$got" -eq 0 ] && echo "[warn] nothing downloaded -- did the fit run on lxplus yet?"
 }
 
+# ---- the ELECTRON ID+ISO SF study (2026-09-25): a SEPARATE stream -------------
+# its own inputs, scripts and out-tree (test/pO_idiso_sf_out/); nothing above
+# reads or writes any of it, and these two functions touch nothing else.
+upload_idiso() {
+  local d="$ANA_LOCAL/correction/rootfile/idiso_sf_ele"
+  echo "== upload the ID+iso SF inputs -> $LX:$ANA_LX/correction/rootfile/idiso_sf_ele/ =="
+  if ! ls "$d"/combine_input_idiso_*.root >/dev/null 2>&1; then
+    echo "[ERROR] no $d/combine_input_idiso_*.root -- run correction/run_idiso_sf.sh (skim + inputs) first."
+    err=1; return
+  fi
+  rmkdir "$ANA_LX/correction/rootfile/idiso_sf_ele"
+  # the inputs travel with their _meta.txt sidecars (the card generator reads nbins there)
+  ( cd "$d" && run combine_input_idiso_*.root combine_input_idiso_*_meta.txt \
+                   "$LX:$ANA_LX/correction/rootfile/idiso_sf_ele/" ) || err=1
+  echo "== upload the ID+iso SF scripts -> $LX:$FORK_LX/test/ =="
+  rmkdir "$FORK_LX/test/my_script"
+  run "$FORK_LOCAL/test/run_pO_idiso_sf.sh" "$LX:$FORK_LX/test/" || err=1
+  # + the shared postfit plotter and its helpers (unchanged files are skipped by rsync)
+  run "$FORK_LOCAL/test/my_script/make_pO_idiso_sf_cards.sh" \
+      "$FORK_LOCAL/test/my_script/extract_pO_idiso_sf.C" \
+      "$FORK_LOCAL/test/my_script/draw_postfit_pO.C" \
+      "$FORK_LOCAL/test/my_script/plotting_helper.C" \
+      "$FORK_LOCAL/test/my_script/CMS_lumi.C" \
+      "$FORK_LOCAL/test/my_script/CMS_lumi.h" \
+      "$LX:$FORK_LX/test/my_script/" || err=1
+}
+
+download_idiso() {
+  local r="$FORK_LX/test/pO_idiso_sf_out"
+  echo "== download the ID+iso SF results <- $LX:$r/ =="
+  if ! rexists "$r"; then echo "[warn] no remote $r -- did run_pO_idiso_sf.sh run yet?"; return; fi
+  mkdir -p "$FORK_LOCAL/test/pO_idiso_sf_out"
+  # everything per tag (summary/, datacards/, the combine logs, fitDiagnostics_idiso_*.root)
+  # EXCEPT the workspaces, combine's higgsCombine* files and the input copies (the
+  # originals are local). Plain --exclude patterns: macOS's rsync has no '***'.
+  if [ "$POSTFIT" -eq 1 ]; then
+    run --exclude 'workspace.root' --exclude 'higgsCombine*' --exclude 'combine_input_idiso_*.root' \
+        "$LX:$r/" "$FORK_LOCAL/test/pO_idiso_sf_out/" || err=1
+  else
+    run --exclude 'workspace.root' --exclude 'higgsCombine*' --exclude 'combine_input_idiso_*.root' \
+        --exclude 'postfit' "$LX:$r/" "$FORK_LOCAL/test/pO_idiso_sf_out/" || err=1
+  fi
+}
+
 case "$CMD" in
   upload)         open_master; upload_inputs; upload_scripts ;;
   upload-inputs)  open_master; upload_inputs ;;
   upload-scripts) open_master; upload_scripts ;;
   download)       open_master; download_results ;;
-  *) echo "usage: $0 {upload|upload-inputs|upload-scripts|download} [--chan mu|ele] [--postfit] [--dry-run]"; exit 1 ;;
+  upload-idiso)   open_master; upload_idiso ;;
+  download-idiso) open_master; download_idiso ;;
+  *) echo "usage: $0 {upload|upload-inputs|upload-scripts|download|upload-idiso|download-idiso} [--chan mu|ele] [--postfit] [--dry-run]"; exit 1 ;;
 esac
 
 echo ""
@@ -277,4 +332,15 @@ case "$CMD" in
     echo "Check in its output that the contour came from the scan, not the ellipse:"
     echo "    [profiled] using .../higgsCombine_contour_lab.MultiDimFit.mH*.root"
     echo "    [profiled] scan min vs covariance best fit: d(sigma_W) = +0.0000 nb" ;;
+  upload-idiso)
+    echo "[sync_lxplus] ID+iso SF upload done. Next, on lxplus:"
+    echo "    ssh $LX"
+    echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
+    echo "    # the 9 W variants (3 binnings x 3 sideband windows; lepton pT at m_T > 40, the nominal"
+    echo "    # in-fit ABCD) + the Z tag-and-probe fit 'ztnp', each with its Asimov closure:"
+    echo "    ./run_pO_idiso_sf.sh --asimov" ;;
+  download-idiso)
+    echo "[sync_lxplus] ID+iso SF download done: $FORK_LOCAL/test/pO_idiso_sf_out/<tag>/summary/"
+    echo "    idiso_sf_<tag>.csv (per bin; the Z tag-and-probe under <tag> = ztnp),"
+    echo "    extract_idiso_sf_<tag>.log (fit quality, Asimov closure, the in-fit ABCD multipliers)" ;;
 esac
