@@ -1,0 +1,397 @@
+Warning: Bin ele_Wp_pass_k0_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_pass_k0_CRD has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k0_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k0_CRD has no signal processes contributing to it
+Warning: Bin ele_Wp_pass_k1_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_pass_k1_CRD has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k1_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k1_CRD has no signal processes contributing to it
+Warning: Bin ele_Wp_pass_k2_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_pass_k2_CRD has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k2_CRC has no signal processes contributing to it
+Warning: Bin ele_Wp_fail_k2_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k0_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k0_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k0_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k0_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k1_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k1_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k1_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k1_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k2_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_pass_k2_CRD has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k2_CRC has no signal processes contributing to it
+Warning: Bin ele_Wm_fail_k2_CRD has no signal processes contributing to it
+Will create a POI  r_Wp_pass_k0  with factory  r_Wp_pass_k0[1,0,10]
+Mapping  r_Wp_pass_k0  to  ['ele_Wp_pass_k0(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wp_fail_k0  with factory  r_Wp_fail_k0[1,0,10]
+Mapping  r_Wp_fail_k0  to  ['ele_Wp_fail_k0(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wp_pass_k1  with factory  r_Wp_pass_k1[1,0,10]
+Mapping  r_Wp_pass_k1  to  ['ele_Wp_pass_k1(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wp_fail_k1  with factory  r_Wp_fail_k1[1,0,10]
+Mapping  r_Wp_fail_k1  to  ['ele_Wp_fail_k1(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wp_pass_k2  with factory  r_Wp_pass_k2[1,0,10]
+Mapping  r_Wp_pass_k2  to  ['ele_Wp_pass_k2(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wp_fail_k2  with factory  r_Wp_fail_k2[1,0,10]
+Mapping  r_Wp_fail_k2  to  ['ele_Wp_fail_k2(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_pass_k0  with factory  r_Wm_pass_k0[1,0,10]
+Mapping  r_Wm_pass_k0  to  ['ele_Wm_pass_k0(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_fail_k0  with factory  r_Wm_fail_k0[1,0,10]
+Mapping  r_Wm_fail_k0  to  ['ele_Wm_fail_k0(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_pass_k1  with factory  r_Wm_pass_k1[1,0,10]
+Mapping  r_Wm_pass_k1  to  ['ele_Wm_pass_k1(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_fail_k1  with factory  r_Wm_fail_k1[1,0,10]
+Mapping  r_Wm_fail_k1  to  ['ele_Wm_fail_k1(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_pass_k2  with factory  r_Wm_pass_k2[1,0,10]
+Mapping  r_Wm_pass_k2  to  ['ele_Wm_pass_k2(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Wm_fail_k2  with factory  r_Wm_fail_k2[1,0,10]
+Mapping  r_Wm_fail_k2  to  ['ele_Wm_fail_k2(_CRB)?/(signal|wtau)$']  patterns
+Will create a POI  r_Z  with factory  r_Z[1,0,10]
+Mapping  r_Z  to  ['.*/(z|ztau|zsig)$']  patterns
+MH (not there before) will be assumed to be 0
+Will scale  ele_Wp_pass_k0/signal  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0/z  by  r_Z
+Will scale  ele_Wp_pass_k0/ztau  by  r_Z
+Will scale  ele_Wp_pass_k0/wtau  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRB/signal  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0_CRB/wtau  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k0_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k0_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k0/signal  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0/z  by  r_Z
+Will scale  ele_Wp_fail_k0/ztau  by  r_Z
+Will scale  ele_Wp_fail_k0/wtau  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRB/signal  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0_CRB/wtau  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k0_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k0_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRD/ewk  by  1
+Will scale  ele_Wp_pass_k1/signal  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1/z  by  r_Z
+Will scale  ele_Wp_pass_k1/ztau  by  r_Z
+Will scale  ele_Wp_pass_k1/wtau  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRB/signal  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1_CRB/wtau  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k1_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k1_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k1/signal  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1/z  by  r_Z
+Will scale  ele_Wp_fail_k1/ztau  by  r_Z
+Will scale  ele_Wp_fail_k1/wtau  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRB/signal  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1_CRB/wtau  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k1_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k1_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRD/ewk  by  1
+Will scale  ele_Wp_pass_k2/signal  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2/z  by  r_Z
+Will scale  ele_Wp_pass_k2/ztau  by  r_Z
+Will scale  ele_Wp_pass_k2/wtau  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRB/signal  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2_CRB/wtau  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k2_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k2_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k2/signal  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2/z  by  r_Z
+Will scale  ele_Wp_fail_k2/ztau  by  r_Z
+Will scale  ele_Wp_fail_k2/wtau  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRB/signal  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2_CRB/wtau  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k2_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k2_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k0/signal  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0/z  by  r_Z
+Will scale  ele_Wm_pass_k0/ztau  by  r_Z
+Will scale  ele_Wm_pass_k0/wtau  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRB/signal  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0_CRB/wtau  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k0_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k0_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k0/signal  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0/z  by  r_Z
+Will scale  ele_Wm_fail_k0/ztau  by  r_Z
+Will scale  ele_Wm_fail_k0/wtau  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRB/signal  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0_CRB/wtau  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k0_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k0_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k1/signal  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1/z  by  r_Z
+Will scale  ele_Wm_pass_k1/ztau  by  r_Z
+Will scale  ele_Wm_pass_k1/wtau  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRB/signal  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1_CRB/wtau  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k1_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k1_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k1/signal  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1/z  by  r_Z
+Will scale  ele_Wm_fail_k1/ztau  by  r_Z
+Will scale  ele_Wm_fail_k1/wtau  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRB/signal  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1_CRB/wtau  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k1_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k1_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k2/signal  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2/z  by  r_Z
+Will scale  ele_Wm_pass_k2/ztau  by  r_Z
+Will scale  ele_Wm_pass_k2/wtau  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRB/signal  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2_CRB/wtau  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k2_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k2_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k2/signal  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2/z  by  r_Z
+Will scale  ele_Wm_fail_k2/ztau  by  r_Z
+Will scale  ele_Wm_fail_k2/wtau  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRB/signal  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2_CRB/wtau  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k2_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k2_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRD/ewk  by  1
+Will scale  ele_Z_PP/zsig  by  r_Z
+Will scale  ele_Z_PP/w  by  1
+Will scale  ele_Z_PP/wtau  by  1
+Will scale  ele_Z_PP/ztau  by  r_Z
+Will scale  ele_Z_PP/bkg  by  1
+Will scale  ele_Wp_pass_k0/signal  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0/z  by  r_Z
+Will scale  ele_Wp_pass_k0/ztau  by  r_Z
+Will scale  ele_Wp_pass_k0/wtau  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRB/signal  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0_CRB/wtau  by  r_Wp_pass_k0
+Will scale  ele_Wp_pass_k0_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k0_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k0_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k0_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k0/signal  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0/z  by  r_Z
+Will scale  ele_Wp_fail_k0/ztau  by  r_Z
+Will scale  ele_Wp_fail_k0/wtau  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRB/signal  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0_CRB/wtau  by  r_Wp_fail_k0
+Will scale  ele_Wp_fail_k0_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k0_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k0_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k0_CRD/ewk  by  1
+Will scale  ele_Wp_pass_k1/signal  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1/z  by  r_Z
+Will scale  ele_Wp_pass_k1/ztau  by  r_Z
+Will scale  ele_Wp_pass_k1/wtau  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRB/signal  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1_CRB/wtau  by  r_Wp_pass_k1
+Will scale  ele_Wp_pass_k1_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k1_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k1_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k1_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k1/signal  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1/z  by  r_Z
+Will scale  ele_Wp_fail_k1/ztau  by  r_Z
+Will scale  ele_Wp_fail_k1/wtau  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRB/signal  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1_CRB/wtau  by  r_Wp_fail_k1
+Will scale  ele_Wp_fail_k1_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k1_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k1_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k1_CRD/ewk  by  1
+Will scale  ele_Wp_pass_k2/signal  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2/z  by  r_Z
+Will scale  ele_Wp_pass_k2/ztau  by  r_Z
+Will scale  ele_Wp_pass_k2/wtau  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRB/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRB/signal  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2_CRB/wtau  by  r_Wp_pass_k2
+Will scale  ele_Wp_pass_k2_CRB/z  by  r_Z
+Will scale  ele_Wp_pass_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wp_pass_k2_CRC/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRC/ewk  by  1
+Will scale  ele_Wp_pass_k2_CRD/qcd  by  1
+Will scale  ele_Wp_pass_k2_CRD/ewk  by  1
+Will scale  ele_Wp_fail_k2/signal  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2/z  by  r_Z
+Will scale  ele_Wp_fail_k2/ztau  by  r_Z
+Will scale  ele_Wp_fail_k2/wtau  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRB/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRB/signal  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2_CRB/wtau  by  r_Wp_fail_k2
+Will scale  ele_Wp_fail_k2_CRB/z  by  r_Z
+Will scale  ele_Wp_fail_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wp_fail_k2_CRC/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRC/ewk  by  1
+Will scale  ele_Wp_fail_k2_CRD/qcd  by  1
+Will scale  ele_Wp_fail_k2_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k0/signal  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0/z  by  r_Z
+Will scale  ele_Wm_pass_k0/ztau  by  r_Z
+Will scale  ele_Wm_pass_k0/wtau  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRB/signal  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0_CRB/wtau  by  r_Wm_pass_k0
+Will scale  ele_Wm_pass_k0_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k0_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k0_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k0_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k0/signal  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0/z  by  r_Z
+Will scale  ele_Wm_fail_k0/ztau  by  r_Z
+Will scale  ele_Wm_fail_k0/wtau  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRB/signal  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0_CRB/wtau  by  r_Wm_fail_k0
+Will scale  ele_Wm_fail_k0_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k0_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k0_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k0_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k0_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k1/signal  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1/z  by  r_Z
+Will scale  ele_Wm_pass_k1/ztau  by  r_Z
+Will scale  ele_Wm_pass_k1/wtau  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRB/signal  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1_CRB/wtau  by  r_Wm_pass_k1
+Will scale  ele_Wm_pass_k1_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k1_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k1_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k1_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k1/signal  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1/z  by  r_Z
+Will scale  ele_Wm_fail_k1/ztau  by  r_Z
+Will scale  ele_Wm_fail_k1/wtau  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRB/signal  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1_CRB/wtau  by  r_Wm_fail_k1
+Will scale  ele_Wm_fail_k1_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k1_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k1_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k1_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k1_CRD/ewk  by  1
+Will scale  ele_Wm_pass_k2/signal  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2/z  by  r_Z
+Will scale  ele_Wm_pass_k2/ztau  by  r_Z
+Will scale  ele_Wm_pass_k2/wtau  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRB/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRB/signal  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2_CRB/wtau  by  r_Wm_pass_k2
+Will scale  ele_Wm_pass_k2_CRB/z  by  r_Z
+Will scale  ele_Wm_pass_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wm_pass_k2_CRC/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRC/ewk  by  1
+Will scale  ele_Wm_pass_k2_CRD/qcd  by  1
+Will scale  ele_Wm_pass_k2_CRD/ewk  by  1
+Will scale  ele_Wm_fail_k2/signal  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2/z  by  r_Z
+Will scale  ele_Wm_fail_k2/ztau  by  r_Z
+Will scale  ele_Wm_fail_k2/wtau  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRB/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRB/signal  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2_CRB/wtau  by  r_Wm_fail_k2
+Will scale  ele_Wm_fail_k2_CRB/z  by  r_Z
+Will scale  ele_Wm_fail_k2_CRB/ztau  by  r_Z
+Will scale  ele_Wm_fail_k2_CRC/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRC/ewk  by  1
+Will scale  ele_Wm_fail_k2_CRD/qcd  by  1
+Will scale  ele_Wm_fail_k2_CRD/ewk  by  1
+Will scale  ele_Z_PP/zsig  by  r_Z
+Will scale  ele_Z_PP/w  by  1
+Will scale  ele_Z_PP/wtau  by  1
+Will scale  ele_Z_PP/ztau  by  r_Z
+Will scale  ele_Z_PP/bkg  by  1

@@ -1,0 +1,2 @@
+tag,scheme,disc,sbwin,bin,lo,hi,charge,S_pass,S_fail,eps_mc,r_pass,r_pass_err,r_fail,r_fail_err,rho_pass_fail,N_pass,N_fail,eps_data,eps_data_err,sf,sf_err,status,covQual
+ztnp,ztnp,mee,none,ztnp,0,0,all,370.307,78.1201,0.825791,1.08483,0.0765133,1.35235,0.141028,0,401.72,105.646,0.791776,0.020756,0.958809,0.0251346,0,3

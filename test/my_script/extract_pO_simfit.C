@@ -149,6 +149,12 @@ Par LnNScale(const RooFitResult *fr, double kappa, const TString &name) {
 // evaluated from its floating constituents with the error propagated through
 // the full correlation matrix:  dM/dp_i / M = (ln kappa, 1/sB, 1/sC, -1/sD).
 // Parameters with zero error (or absent) drop out of the propagation.
+// NB (2026-09-29) the electron SR qcd_abcd template is fake-factor weighted
+// and its slope is a SHAPE nuisance (qcdFF_ele_<C>), which moves the template
+// normalization too (+-5-6% at +-1 sigma); M does not include that part. It is
+// reported with the other shape nuisances (<name>_theta rows), and
+// postfit_incl.C reads the postfit shapes from fitDiagnostics whenever shape
+// nuisances are present, so nothing downstream relies on M alone.
 Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char *chg) {
   Par p; p.ok = false; p.v = 1.0; p.e = 0.0;
   if (!fr) return p;

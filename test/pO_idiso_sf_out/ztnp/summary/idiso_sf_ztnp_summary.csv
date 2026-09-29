@@ -1,0 +1,11 @@
+fit,param,value,error
+nominal,status,0,0
+nominal,covQual,3,0
+nominal,bkg_norm_ele_Z_PF,0.451603,0.867136
+nominal,bkg_norm_ele_Z_PP,3.36573e-07,1.91677
+nominal,r_ZPF,1.35235,0.141028
+nominal,r_ZPP,1.08483,0.0765133
+asimov,bkg_norm_ele_Z_PF,1,1.0064
+asimov,bkg_norm_ele_Z_PP,1,7.08302
+asimov,r_ZPF,1,0.126347
+asimov,r_ZPP,1,0.0788836

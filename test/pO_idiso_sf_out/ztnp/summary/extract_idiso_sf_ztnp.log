@@ -1,0 +1,18 @@
+   ------------------------------------------------------------------
+  | Welcome to ROOT 6.30/07                        https://root.cern |
+  | (c) 1995-2024, The ROOT Team; conception: R. Brun, F. Rademakers |
+  | Built for linuxx8664gcc on May 23 2024, 18:39:37                 |
+  | From heads/master@tags/v6-30-07                                  |
+  | With g++ (GCC) 12.3.1 20230527                                   |
+  | Try '.help'/'.?', '.demo', '.license', '.credits', '.quit'/'.q'  |
+   ------------------------------------------------------------------
+
+
+Processing /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/my_script/extract_pO_idiso_sf.C("/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/fits/fitDiagnostics_idiso_ztnp.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/fits/fitDiagnostics_idiso_ztnp_asimov.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/combine_input_idiso_ztnp.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/combine_input_idiso_ztnp_meta.txt","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/summary","ztnp",1.15)...
+[idiso-sf] ztnp: scheme ztnp, disc mee, QCD sideband none, 1 bin(s); fit status 0, covQual 3
+[idiso-sf] ztnp   bin ztnp all  eps_data 0.7918 +- 0.0208  eps_MC 0.8258  SF 0.9588 +- 0.0251   (N_pass 402, N_fail 106)
+[idiso-sf] ztnp bkg_norm_ele_Z_PF            = 0.452 +- 0.867
+[idiso-sf] ztnp bkg_norm_ele_Z_PP            = 0.000 +- 1.917
+[asimov] ztnp: max |POI - 1|, |rateParam - 1|, |theta| = 4.44e-16 (bkg_norm_ele_Z_PF) -> PASS   (status 0, covQual 3)
+[expected] ztnp   bin ztnp all  eps_MC 0.8258  expected eps error 0.0214 -> SF 1 +- 0.0259
+[idiso-sf] wrote /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/summary/idiso_sf_ztnp.csv and /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/ztnp/summary/idiso_sf_ztnp_summary.csv

@@ -106,6 +106,11 @@ struct PlotStyle
     double pullCanvasScale = 1.125; // canvas-height multiplier when pullPad is on
     double pullYRange = -1.0;  // fixed symmetric |pull| axis; <0 -> auto (max(3, 1.15*max|pull|))
 
+    // Ratio-pad y range of SaveDataMCRatio (opt-in, 2026-09-26). The default
+    // 0.5-1.5 is what every caller had before; a diagnostic whose ratio runs far
+    // from 1 (the ID+iso study's fail-channel QCD shape reaches 3) widens it.
+    double ratioLo = 0.5, ratioHi = 1.5;
+
     // Systematic-uncertainty boxes (2026-09-15), used by MakeSystBoxes and by
     // the SaveNiceGraph* variants that are handed a statistical-error graph.
     // The box is the SYSTEMATIC alone (CMS convention), centred on the point;
@@ -1356,8 +1361,8 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
     hr->GetYaxis()->SetTitleOffset(ps.yTitleOffset / sf);
     hr->GetYaxis()->SetNdivisions(505);
 
-    hr->SetMinimum(0.5);
-    hr->SetMaximum(1.5);
+    hr->SetMinimum(ps.ratioLo);
+    hr->SetMaximum(ps.ratioHi);
     hr->Draw("E1");
 
     TLine *l1 = new TLine(hr->GetXaxis()->GetBinLowEdge(hr->GetXaxis()->GetFirst()), 1.0,

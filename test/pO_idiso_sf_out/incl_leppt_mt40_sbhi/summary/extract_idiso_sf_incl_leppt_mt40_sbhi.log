@@ -1,0 +1,24 @@
+   ------------------------------------------------------------------
+  | Welcome to ROOT 6.30/07                        https://root.cern |
+  | (c) 1995-2024, The ROOT Team; conception: R. Brun, F. Rademakers |
+  | Built for linuxx8664gcc on May 23 2024, 18:39:37                 |
+  | From heads/master@tags/v6-30-07                                  |
+  | With g++ (GCC) 12.3.1 20230527                                   |
+  | Try '.help'/'.?', '.demo', '.license', '.credits', '.quit'/'.q'  |
+   ------------------------------------------------------------------
+
+
+Processing /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/my_script/extract_pO_idiso_sf.C("/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/fits/fitDiagnostics_idiso_incl_leppt_mt40_sbhi.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/fits/fitDiagnostics_idiso_incl_leppt_mt40_sbhi_asimov.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/combine_input_idiso_incl_leppt_mt40_sbhi.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/combine_input_idiso_incl_leppt_mt40_sbhi_meta.txt","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/summary","incl_leppt_mt40_sbhi",1.15)...
+[idiso-sf] incl_leppt_mt40_sbhi: scheme incl, disc leppt_mt40, QCD sideband sbhi, 1 bin(s); fit status 0, covQual 3
+[idiso-sf] incl_leppt_mt40_sbhi bin 0   Wp   eps_data 0.3361 +- 0.0065  eps_MC 0.8063  SF 0.4169 +- 0.0081   (N_pass 1946, N_fail 3843)
+[idiso-sf] incl_leppt_mt40_sbhi bin 0   Wm   eps_data 0.3270 +- 0.0069  eps_MC 0.8066  SF 0.4054 +- 0.0086   (N_pass 1496, N_fail 3080)
+[idiso-sf] incl_leppt_mt40_sbhi bin 0   all  eps_data 0.3321 +- 0.0047  eps_MC 0.8064  SF 0.4118 +- 0.0059   (N_pass 3442, N_fail 6923)
+[idiso-sf] incl_leppt_mt40_sbhi QCD in-fit ABCD Wp_pass_k0   sB 0.926 +- 0.045  sC 0.947 +- 0.054  sD 1.044 +- 0.052  theta -2.26 +- 0.80  -> SR multiplier 0.612 +- 0.072
+[idiso-sf] incl_leppt_mt40_sbhi QCD in-fit ABCD Wp_fail_k0   sB 0.996 +- 0.006  sC 0.998 +- 0.010  sD 1.001 +- 0.009  theta -2.25 +- 0.12  -> SR multiplier 0.725 +- 0.006
+[idiso-sf] incl_leppt_mt40_sbhi QCD in-fit ABCD Wm_pass_k0   sB 0.922 +- 0.043  sC 0.928 +- 0.052  sD 1.060 +- 0.051  theta -3.20 +- 0.77  -> SR multiplier 0.516 +- 0.056
+[idiso-sf] incl_leppt_mt40_sbhi QCD in-fit ABCD Wm_fail_k0   sB 0.996 +- 0.006  sC 0.999 +- 0.010  sD 1.001 +- 0.009  theta -2.01 +- 0.12  -> SR multiplier 0.750 +- 0.006
+[idiso-sf] incl_leppt_mt40_sbhi bkg_norm_ele_Z_PP            = 0.000 +- 1.361
+[idiso-sf] incl_leppt_mt40_sbhi r_Z = 1.2670 +- 0.0889 (Z_PP, both legs pass)
+[asimov] incl_leppt_mt40_sbhi: max |POI - 1|, |rateParam - 1|, |theta| = 1.61e-06 (bkg_norm_ele_Z_PP) -> PASS   (status 0, covQual 3)
+[expected] incl_leppt_mt40_sbhi bin 0    all  eps_MC 0.8064  expected eps error 0.1040 -> SF 1 +- 0.1290
+[idiso-sf] wrote /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/summary/idiso_sf_incl_leppt_mt40_sbhi.csv and /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/incl_leppt_mt40_sbhi/summary/idiso_sf_incl_leppt_mt40_sbhi_summary.csv

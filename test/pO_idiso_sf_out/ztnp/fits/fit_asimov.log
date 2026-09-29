@@ -1,0 +1,24 @@
+ <<< Combine >>> 
+ <<< v10.5.1 >>>
+>>> Random number generator seed is 123456
+>>> Method used is FitDiagnostics
+ModelConfig 'ModelConfig' defines more than one parameter of interest. This is not supported in some statistical methods.
+Set Default Value of Parameter r_ZPF To : 1
+Set Default Value of Parameter r_ZPP To : 1
+PDF didn't factorize!
+Parameters: 
+  1) RooRealVar::           bkg_norm_ele_Z_PF = 1
+  2) RooRealVar::           bkg_norm_ele_Z_PP = 1
+  3) RooRealVar::    n_exp_binele_Z_PF_proc_w = 0.814939
+  4) RooRealVar:: n_exp_binele_Z_PF_proc_wtau = 0.065389
+  5) RooRealVar::    n_exp_binele_Z_PP_proc_w = 0.00744714
+  6) RooRealVar:: n_exp_binele_Z_PP_proc_wtau = 1e-06
+  7) RooRealVar::                       r_ZPF = 1
+  8) RooRealVar::                       r_ZPP = 0
+Obs: 
+  1) RooRealVar::    CMS_th1x = 59.5
+  2) RooCategory:: CMS_channel = ele_Z_PP(idx = 0)
+
+
+ --- FitDiagnostics ---
+Best fit r_ZPP: 1  -0.0770956/+0.0794804  (68% CL)

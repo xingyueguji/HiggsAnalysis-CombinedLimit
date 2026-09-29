@@ -1,0 +1,2 @@
+map=ele_Z_PP/(zsig|ztau)$:r_ZPP[1,0,10]
+map=ele_Z_PF/(zsig|ztau)$:r_ZPF[1,0,10]

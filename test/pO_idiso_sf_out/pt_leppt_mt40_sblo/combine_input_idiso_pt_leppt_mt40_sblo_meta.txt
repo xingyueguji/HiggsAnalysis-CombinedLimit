@@ -1,0 +1,10 @@
+# written by correction/idiso_sf_inputs.C -- the ID+iso SF fit input next to it
+scheme pt
+disc leppt_mt40
+sbwin sblo
+nbins 3
+bin 0 25 35
+bin 1 35 50
+bin 2 50 -1
+xtitle p_{T}^{e} (GeV)
+ytitle Events / 2.0 GeV

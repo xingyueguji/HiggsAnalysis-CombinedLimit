@@ -1,0 +1,8 @@
+# written by correction/idiso_sf_inputs.C -- the Z tag-and-probe input next to it
+scheme ztnp
+disc mee
+sbwin none
+nbins 1
+bin 0 60 120
+xtitle m_{ee} (GeV)
+ytitle Events / 1.0 GeV

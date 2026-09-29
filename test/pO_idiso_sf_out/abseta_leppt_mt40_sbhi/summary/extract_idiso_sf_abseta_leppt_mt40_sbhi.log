@@ -1,0 +1,50 @@
+   ------------------------------------------------------------------
+  | Welcome to ROOT 6.30/07                        https://root.cern |
+  | (c) 1995-2024, The ROOT Team; conception: R. Brun, F. Rademakers |
+  | Built for linuxx8664gcc on May 23 2024, 18:39:37                 |
+  | From heads/master@tags/v6-30-07                                  |
+  | With g++ (GCC) 12.3.1 20230527                                   |
+  | Try '.help'/'.?', '.demo', '.license', '.credits', '.quit'/'.q'  |
+   ------------------------------------------------------------------
+
+
+Processing /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/my_script/extract_pO_idiso_sf.C("/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/fits/fitDiagnostics_idiso_abseta_leppt_mt40_sbhi.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/fits/fitDiagnostics_idiso_abseta_leppt_mt40_sbhi_asimov.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/combine_input_idiso_abseta_leppt_mt40_sbhi.root","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/combine_input_idiso_abseta_leppt_mt40_sbhi_meta.txt","/afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/summary","abseta_leppt_mt40_sbhi",1.15)...
+[idiso-sf] abseta_leppt_mt40_sbhi: scheme abseta, disc leppt_mt40, QCD sideband sbhi, 4 bin(s); fit status 0, covQual 3
+[idiso-sf] abseta_leppt_mt40_sbhi bin 0   Wp   eps_data 0.3896 +- 0.0095  eps_MC 0.8374  SF 0.4653 +- 0.0114   (N_pass 724, N_fail 1135)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 0   Wm   eps_data 0.3807 +- 0.0104  eps_MC 0.8395  SF 0.4535 +- 0.0124   (N_pass 578, N_fail 941)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 0   all  eps_data 0.3856 +- 0.0070  eps_MC 0.8383  SF 0.4600 +- 0.0084   (N_pass 1303, N_fail 2076)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 1   Wp   eps_data 0.2697 +- 0.0106  eps_MC 0.7624  SF 0.3538 +- 0.0139   (N_pass 497, N_fail 1346)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 1   Wm   eps_data 0.2774 +- 0.0111  eps_MC 0.7657  SF 0.3622 +- 0.0144   (N_pass 413, N_fail 1077)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 1   all  eps_data 0.2731 +- 0.0077  eps_MC 0.7639  SF 0.3576 +- 0.0100   (N_pass 910, N_fail 2422)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 2   Wp   eps_data 0.4036 +- 0.0135  eps_MC 0.8310  SF 0.4857 +- 0.0162   (N_pass 433, N_fail 640)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 2   Wm   eps_data 0.3673 +- 0.0173  eps_MC 0.8297  SF 0.4427 +- 0.0209   (N_pass 289, N_fail 497)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 2   all  eps_data 0.3883 +- 0.0107  eps_MC 0.8304  SF 0.4676 +- 0.0128   (N_pass 722, N_fail 1137)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 3   Wp   eps_data 0.3175 +- 0.0137  eps_MC 0.7881  SF 0.4028 +- 0.0174   (N_pass 336, N_fail 722)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 3   Wm   eps_data 0.2925 +- 0.0152  eps_MC 0.7785  SF 0.3757 +- 0.0196   (N_pass 234, N_fail 565)
+[idiso-sf] abseta_leppt_mt40_sbhi bin 3   all  eps_data 0.3067 +- 0.0102  eps_MC 0.7840  SF 0.3912 +- 0.0130   (N_pass 570, N_fail 1287)
+[idiso-sf] abseta_leppt_mt40_sbhi bin all all  eps_data 0.3361 +- 0.0044  eps_MC 0.8064  SF 0.4168 +- 0.0055   (N_pass 3505, N_fail 6923)
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_pass_k0   sB 0.702 +- 0.119  sC 0.976 +- 0.087  sD 1.021 +- 0.083  theta -2.45 +- 0.84  -> SR multiplier 0.476 +- 0.105
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_fail_k0   sB 0.969 +- 0.013  sC 0.970 +- 0.014  sD 1.032 +- 0.015  theta -1.38 +- 0.12  -> SR multiplier 0.751 +- 0.012
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_pass_k0   sB 0.679 +- 0.129  sC 0.977 +- 0.090  sD 1.021 +- 0.088  theta -3.02 +- 0.80  -> SR multiplier 0.426 +- 0.100
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_fail_k0   sB 0.963 +- 0.013  sC 0.962 +- 0.014  sD 1.041 +- 0.015  theta -1.06 +- 0.12  -> SR multiplier 0.768 +- 0.011
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_pass_k1   sB 0.813 +- 0.123  sC 1.025 +- 0.115  sD 0.977 +- 0.106  theta -2.45 +- 0.84  -> SR multiplier 0.606 +- 0.152
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_fail_k1   sB 0.978 +- 0.013  sC 0.979 +- 0.015  sD 1.020 +- 0.015  theta -1.38 +- 0.12  -> SR multiplier 0.775 +- 0.012
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_pass_k1   sB 0.787 +- 0.107  sC 0.975 +- 0.104  sD 1.020 +- 0.097  theta -3.02 +- 0.80  -> SR multiplier 0.493 +- 0.103
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_fail_k1   sB 0.985 +- 0.012  sC 0.987 +- 0.015  sD 1.012 +- 0.015  theta -1.06 +- 0.12  -> SR multiplier 0.828 +- 0.012
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_pass_k2   sB 0.832 +- 0.070  sC 0.850 +- 0.099  sD 1.117 +- 0.103  theta -2.45 +- 0.84  -> SR multiplier 0.450 +- 0.073
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_fail_k2   sB 1.006 +- 0.011  sC 1.039 +- 0.020  sD 0.974 +- 0.017  theta -1.38 +- 0.12  -> SR multiplier 0.885 +- 0.013
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_pass_k2   sB 0.859 +- 0.069  sC 0.892 +- 0.093  sD 1.096 +- 0.100  theta -3.02 +- 0.80  -> SR multiplier 0.458 +- 0.069
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_fail_k2   sB 1.006 +- 0.011  sC 1.039 +- 0.020  sD 0.976 +- 0.016  theta -1.06 +- 0.12  -> SR multiplier 0.923 +- 0.014
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_pass_k3   sB 0.864 +- 0.075  sC 0.792 +- 0.149  sD 1.128 +- 0.154  theta -2.45 +- 0.84  -> SR multiplier 0.431 +- 0.090
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wp_fail_k3   sB 1.008 +- 0.009  sC 1.139 +- 0.027  sD 0.945 +- 0.018  theta -1.38 +- 0.12  -> SR multiplier 1.002 +- 0.014
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_pass_k3   sB 0.872 +- 0.071  sC 0.748 +- 0.131  sD 1.151 +- 0.144  theta -3.02 +- 0.80  -> SR multiplier 0.372 +- 0.067
+[idiso-sf] abseta_leppt_mt40_sbhi QCD in-fit ABCD Wm_fail_k3   sB 1.009 +- 0.009  sC 1.164 +- 0.028  sD 0.937 +- 0.019  theta -1.06 +- 0.12  -> SR multiplier 1.082 +- 0.015
+[idiso-sf] abseta_leppt_mt40_sbhi bkg_norm_ele_Z_PP            = 0.000 +- 0.773
+[idiso-sf] abseta_leppt_mt40_sbhi r_Z = 2.2652 +- 0.1262 (Z_PP, both legs pass)
+[asimov] abseta_leppt_mt40_sbhi: max |POI - 1|, |rateParam - 1|, |theta| = 4.51e-07 (bkg_norm_ele_Z_PP) -> PASS   (status 0, covQual 3)
+[expected] abseta_leppt_mt40_sbhi bin 0    all  eps_MC 0.8383  expected eps error 0.0965 -> SF 1 +- 0.1151
+[expected] abseta_leppt_mt40_sbhi bin 1    all  eps_MC 0.7639  expected eps error 0.1175 -> SF 1 +- 0.1538
+[expected] abseta_leppt_mt40_sbhi bin 2    all  eps_MC 0.8304  expected eps error 0.1493 -> SF 1 +- 0.1798
+[expected] abseta_leppt_mt40_sbhi bin 3    all  eps_MC 0.7840  expected eps error 0.1359 -> SF 1 +- 0.1734
+[expected] abseta_leppt_mt40_sbhi bin all  all  eps_MC 0.8064  expected eps error 0.0688 -> SF 1 +- 0.0854
+[idiso-sf] wrote /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/summary/idiso_sf_abseta_leppt_mt40_sbhi.csv and /afs/cern.ch/user/z/zheng/CMSSW_14_1_0_pre4/src/HiggsAnalysis/CombinedLimit/test/pO_idiso_sf_out/abseta_leppt_mt40_sbhi/summary/idiso_sf_abseta_leppt_mt40_sbhi_summary.csv

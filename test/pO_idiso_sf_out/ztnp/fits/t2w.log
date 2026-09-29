@@ -1,0 +1,25 @@
+Will create a POI  r_ZPP  with factory  r_ZPP[1,0,10]
+Mapping  r_ZPP  to  ['ele_Z_PP/(zsig|ztau)$']  patterns
+Will create a POI  r_ZPF  with factory  r_ZPF[1,0,10]
+Mapping  r_ZPF  to  ['ele_Z_PF/(zsig|ztau)$']  patterns
+MH (not there before) will be assumed to be 0
+Will scale  ele_Z_PP/zsig  by  r_ZPP
+Will scale  ele_Z_PP/w  by  1
+Will scale  ele_Z_PP/wtau  by  1
+Will scale  ele_Z_PP/ztau  by  r_ZPP
+Will scale  ele_Z_PP/bkg  by  1
+Will scale  ele_Z_PF/zsig  by  r_ZPF
+Will scale  ele_Z_PF/w  by  1
+Will scale  ele_Z_PF/wtau  by  1
+Will scale  ele_Z_PF/ztau  by  r_ZPF
+Will scale  ele_Z_PF/bkg  by  1
+Will scale  ele_Z_PP/zsig  by  r_ZPP
+Will scale  ele_Z_PP/w  by  1
+Will scale  ele_Z_PP/wtau  by  1
+Will scale  ele_Z_PP/ztau  by  r_ZPP
+Will scale  ele_Z_PP/bkg  by  1
+Will scale  ele_Z_PF/zsig  by  r_ZPF
+Will scale  ele_Z_PF/w  by  1
+Will scale  ele_Z_PF/wtau  by  1
+Will scale  ele_Z_PF/ztau  by  r_ZPF
+Will scale  ele_Z_PF/bkg  by  1

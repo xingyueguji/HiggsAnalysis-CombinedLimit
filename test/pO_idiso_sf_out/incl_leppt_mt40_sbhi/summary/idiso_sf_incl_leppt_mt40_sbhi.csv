@@ -1,0 +1,4 @@
+tag,scheme,disc,sbwin,bin,lo,hi,charge,S_pass,S_fail,eps_mc,r_pass,r_pass_err,r_fail,r_fail_err,rho_pass_fail,N_pass,N_fail,eps_data,eps_data_err,sf,sf_err,status,covQual
+incl_leppt_mt40_sbhi,incl,leppt_mt40,sbhi,0,0,0,Wp,1599.74,384.345,0.806286,1.21639,0.0346902,10,0.0581887,4.56244e-07,1945.9,3843.45,0.336117,0.00649492,0.416871,0.00805536,0,3
+incl_leppt_mt40_sbhi,incl,leppt_mt40,sbhi,0,0,0,Wm,1284.46,307.955,0.806612,1.16474,0.036465,10,0.0237061,-9.59485e-06,1496.06,3079.55,0.326964,0.00690921,0.405355,0.00856573,0,3
+incl_leppt_mt40_sbhi,incl,leppt_mt40,sbhi,0,0,0,all,2884.2,692.3,0.806431,-1,0,-1,0,0,3441.96,6923,0.332076,0.00474483,0.411785,0.00588374,0,3
