@@ -7,6 +7,7 @@
 #include "TLine.h"
 #include "TPaveText.h"
 #include "TGraphErrors.h"
+#include "TGraphAsymmErrors.h"
 #include "THStack.h"
 #include "TStyle.h"
 #include "TString.h"
@@ -324,8 +325,15 @@ static void ApplyGraphStyle(TGraphErrors *g, const PlotStyle &ps,
 // Returned boxes are drawn by the caller and then owned by the pad (same
 // convention as the TLine's the graph tuners create); they must stay alive
 // until the canvas is saved.
-static std::vector<TBox *> MakeSystBoxes(const TGraphErrors *gTot,
-                                         const TGraphErrors *gStat,
+//
+// ASYMMETRIC errors (2026-09-30): the two graphs may also be
+// TGraphAsymmErrors (e.g. MINOS intervals of an efficiency near 1, the
+// electron Reco SF of correction/reco_sf_ele.C). Each side is then done
+// separately, box = [y - sqrt(totLo^2 - statLo^2), y + sqrt(totHi^2 -
+// statHi^2)]. For a TGraphErrors GetErrorYlow == GetErrorYhigh == GetErrorY,
+// so the symmetric callers get exactly the box they always got.
+static std::vector<TBox *> MakeSystBoxes(const TGraph *gTot,
+                                         const TGraph *gStat,
                                          const PlotStyle &ps)
 {
     std::vector<TBox *> boxes;
@@ -343,7 +351,9 @@ static std::vector<TBox *> MakeSystBoxes(const TGraphErrors *gTot,
     for (int i = 0; i < n; ++i)
     {
         const double x = gTot->GetPointX(i), y = gTot->GetPointY(i);
-        const double et = gTot->GetErrorY(i), es = gStat->GetErrorY(i);
+        // (low, high) sides; equal for a TGraphErrors (see above)
+        const double etL = gTot->GetErrorYlow(i), etH = gTot->GetErrorYhigh(i);
+        const double esL = gStat->GetErrorYlow(i), esH = gStat->GetErrorYhigh(i);
         // stat <= tot holds exactly (the conditioning subtracts a PSD term),
         // but a point whose systematic is genuinely ~0 can come out a few
         // 1e-6 negative: the derived observables are near-cancelling
@@ -351,12 +361,13 @@ static std::vector<TBox *> MakeSystBoxes(const TGraphErrors *gTot,
         // matrices built through a numerical inversion. Clip those silently
         // and warn only on a real mismatch -- pairing the wrong two graphs
         // shows up percent-level, not at 1e-6.
-        if (es > et * 1.001)
-            std::cerr << "[WARN] MakeSystBoxes: point " << i << " has stat " << es
-                      << " > total " << et << " -> are these the same observable?"
+        if (esL > etL * 1.001 || esH > etH * 1.001)
+            std::cerr << "[WARN] MakeSystBoxes: point " << i << " has stat (-" << esL << " +" << esH
+                      << ") > total (-" << etL << " +" << etH << ") -> are these the same observable?"
                       << " (systematic clipped to 0)\n";
-        const double syst = std::sqrt(std::max(0.0, et * et - es * es));
-        if (syst <= 0.0)
+        const double systLo = std::sqrt(std::max(0.0, etL * etL - esL * esL));
+        const double systHi = std::sqrt(std::max(0.0, etH * etH - esH * esH));
+        if (systLo <= 0.0 && systHi <= 0.0)
             continue;
 
         // Half-width: a fraction of the point's own x error (= the bin
@@ -369,7 +380,7 @@ static std::vector<TBox *> MakeSystBoxes(const TGraphErrors *gTot,
         if (hw <= 0.0)
             continue;
 
-        TBox *b = new TBox(x - hw, y - syst, x + hw, y + syst);
+        TBox *b = new TBox(x - hw, y - systLo, x + hw, y + systHi);
         b->SetFillColorAlpha(ps.systBoxFillColor, ps.systBoxFillAlpha);
         b->SetFillStyle(ps.systBoxFillStyle);
         b->SetLineColor(ps.systBoxLineColor);
@@ -621,10 +632,20 @@ static void SaveNiceGraph_ErrorBand(TGraphErrors *g,
 // Legends: without theory bands one legend, lower left; with them the data
 // legend moves to the upper left (under the CMS label) and the theory legend
 // keeps the lower left, as in the single-fit R_FB plots.
+//
+// ASYMMETRIC errors (opt-in, 2026-09-30): a series may additionally carry
+// gTotAsym / gStatAsym = the SAME points with their (low, high) errors. Then
+// the drawn bars are the asymmetric ones and the syst box is asymmetric too
+// (MakeSystBoxes, per side); gTot / gStat still give the points, the x errors
+// and the frame, and the series' frame graph carries no y errors (only its
+// points), so such callers set the y range in their tuner. A series without
+// them is drawn exactly as before.
 struct OverlaySeries
 {
     TGraphErrors *gTot = nullptr;  // points + TOTAL error (required)
     TGraphErrors *gStat = nullptr; // same points + STATISTICAL error (nullptr -> one total bar, no box)
+    TGraphAsymmErrors *gTotAsym = nullptr;  // optional: same points, asymmetric TOTAL error
+    TGraphAsymmErrors *gStatAsym = nullptr; // optional: same points, asymmetric STATISTICAL error (with gStat)
     std::string label;
     int color = kBlack;
     int marker = 20;
@@ -671,7 +692,11 @@ static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
     // per series: the drawn graph (shifted, no x bars; stat bars when known)
     // and its systematic boxes (from shifted clones that keep the x errors,
     // which MakeSystBoxes sizes the boxes from)
+    // gDraw = the frame/points graph of each series (the first one draws the
+    // axes), gShow = what is drawn on top and put in the legend: gDraw itself,
+    // or the asymmetric twin of an opt-in asymmetric series (see OverlaySeries)
     std::vector<TGraphErrors *> gDraw;
+    std::vector<TGraph *> gShow;
     std::vector<std::vector<TBox *>> boxes;
     for (size_t k = 0; k < ser.size(); ++k)
     {
@@ -680,25 +705,43 @@ static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
         if (s->gStat && !haveStat)
             std::cerr << "[WARN] SaveNiceGraph_Overlay: stat graph of '" << s->label
                       << "' has a different number of points -> total bars only\n";
+        const bool asym = s->gTotAsym && s->gTotAsym->GetN() == s->gTot->GetN() &&
+                          (!haveStat || (s->gStatAsym && s->gStatAsym->GetN() == s->gTot->GetN()));
+        if ((s->gTotAsym || s->gStatAsym) && !asym)
+            std::cerr << "[WARN] SaveNiceGraph_Overlay: asymmetric graphs of '" << s->label
+                      << "' incomplete or of a different size -> symmetric errors drawn\n";
         TGraphErrors *src = haveStat ? s->gStat : s->gTot;
+        const TGraphAsymmErrors *srcA = asym ? (haveStat ? s->gStatAsym : s->gTotAsym) : nullptr;
         const int n = src->GetN();
         TGraphErrors *gd = new TGraphErrors(n);
         gd->SetName(Form("%s_ovl%d", s->gTot->GetName(), (int)k));
-        TGraphErrors *bt = (TGraphErrors *)s->gTot->Clone(Form("%s_ovlT%d", s->gTot->GetName(), (int)k));
-        TGraphErrors *bs = haveStat ? (TGraphErrors *)s->gStat->Clone(Form("%s_ovlS%d", s->gTot->GetName(), (int)k)) : nullptr;
+        TGraphAsymmErrors *ga = asym ? new TGraphAsymmErrors(n) : nullptr;
+        if (ga) ga->SetName(Form("%s_ovlA%d", s->gTot->GetName(), (int)k));
+        // box sources: shifted clones that keep their errors (the asymmetric
+        // pair when given)
+        const TGraph *boxT = asym ? (const TGraph *)s->gTotAsym : (const TGraph *)s->gTot;
+        const TGraph *boxS = !haveStat ? nullptr : (asym ? (const TGraph *)s->gStatAsym : (const TGraph *)s->gStat);
+        TGraph *bt = (TGraph *)boxT->Clone(Form("%s_ovlT%d", s->gTot->GetName(), (int)k));
+        TGraph *bs = boxS ? (TGraph *)boxS->Clone(Form("%s_ovlS%d", s->gTot->GetName(), (int)k)) : nullptr;
         for (int i = 0; i < n; ++i)
         {
             const double x = s->gTot->GetPointX(i) + s->xShift * s->gTot->GetErrorX(i);
             gd->SetPoint(i, x, src->GetPointY(i));
-            gd->SetPointError(i, 0.0, src->GetErrorY(i));
-            bt->SetPoint(i, x, s->gTot->GetPointY(i));
-            if (bs) bs->SetPoint(i, x, s->gStat->GetPointY(i));
+            gd->SetPointError(i, 0.0, asym ? 0.0 : src->GetErrorY(i)); // asymmetric: points only
+            if (ga)
+            {
+                ga->SetPoint(i, x, srcA->GetPointY(i));
+                ga->SetPointError(i, 0.0, 0.0, srcA->GetErrorYlow(i), srcA->GetErrorYhigh(i));
+            }
+            bt->SetPoint(i, x, bt->GetPointY(i));
+            if (bs) bs->SetPoint(i, x, bs->GetPointY(i));
         }
         PlotStyle pb = ps;
         pb.systBoxFillColor = s->color;
         pb.systBoxLineColor = s->color;
         boxes.push_back(bs ? MakeSystBoxes(bt, bs, pb) : std::vector<TBox *>());
         gDraw.push_back(gd);
+        gShow.push_back(ga ? (TGraph *)ga : (TGraph *)gd);
     }
 
     TCanvas *c = new TCanvas(Form("c_ovl_%s", ser[0]->gTot->GetName()), "", ps.w, ps.h);
@@ -718,13 +761,14 @@ static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
 
     // series cosmetics AFTER the tuner (it sets a marker style of its own)
     for (size_t k = 0; k < ser.size(); ++k)
-    {
-        gDraw[k]->SetMarkerStyle(ser[k]->marker);
-        gDraw[k]->SetMarkerSize(ser[k]->markerSize);
-        gDraw[k]->SetMarkerColor(ser[k]->color);
-        gDraw[k]->SetLineColor(ser[k]->color);
-        gDraw[k]->SetLineWidth(2);
-    }
+        for (TGraph *g : {(TGraph *)gDraw[k], gShow[k]})
+        {
+            g->SetMarkerStyle(ser[k]->marker);
+            g->SetMarkerSize(ser[k]->markerSize);
+            g->SetMarkerColor(ser[k]->color);
+            g->SetLineColor(ser[k]->color);
+            g->SetLineWidth(2);
+        }
 
     // shared theory bands (same order/colours/names as SaveNiceGraph_ErrorBand)
     TGraphErrors *models[4] = {g1, g2, g3, g4};
@@ -748,8 +792,8 @@ static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
     bool anyBox = false;
     for (const std::vector<TBox *> &bv : boxes)
         for (TBox *b : bv) { b->Draw(); anyBox = true; }
-    for (TGraphErrors *gd : gDraw)
-        gd->Draw("P SAME");
+    for (TGraph *g : gShow)
+        g->Draw("P SAME");
 
     // legends (see the header comment for the placement)
     const double rowH = 0.042;
@@ -765,7 +809,7 @@ static void SaveNiceGraph_Overlay(const std::vector<OverlaySeries> &series,
     leg->SetTextFont(42);
     leg->SetTextSize(0.032);
     for (size_t k = 0; k < ser.size(); ++k)
-        leg->AddEntry(gDraw[k], ser[k]->label.c_str(), "lep");
+        leg->AddEntry(gShow[k], ser[k]->label.c_str(), "lep");
     if (anyBox)
     {
         TBox *key = new TBox(0, 0, 1, 1); // legend glyph only, never drawn
