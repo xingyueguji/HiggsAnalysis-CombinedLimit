@@ -26,6 +26,9 @@
 //   kLumi > 1 -> the global 'lumi' lnN exists; its multiplier (+err) is appended
 //     as two extra CSV columns (lumi,lumiErr; 1,0 when off) -- postfit_incl.C
 //     uses it to keep the "prefit x fitted scale" reconstruction exact.
+//   ttbar_xsec (2026-10-16): the lnN on the frozen ttbar MC, looked up BY NAME
+//     (no argument -- absent in pre-ttbar cards and then skipped); its pull goes
+//     to the summary CSV as ttbar_xsec_theta and into the Asimov closure.
 //   The trailing qcd_model CSV column (18th, 2026-08-23) records which of the
 //     three modes produced the row, so readers (postfit_incl.C) know whether
 //     the multiplier applies to the `qcd` or the `qcd_abcd` template.
@@ -480,6 +483,16 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                   << kLumi << " given)\n";
       }
     }
+    // ttbar normalization lnN (2026-10-16): found by name, absent in older
+    // cards (no ttbar column) -> silently skipped. Pull + post-fit constraint.
+    {
+      Par tth = GetPar(fr, "ttbar_xsec");
+      if (tth.ok) {
+        std::cout << "[extract-simfit] " << fitName << ": ttbar_xsec pull = "
+                  << Form("%.3f +/- %.3f", tth.v, tth.e) << "\n";
+        scsv << fitName << ",ttbar_xsec_theta," << tth.v << "," << tth.e << ",,,\n";
+      }
+    }
     if (kQcdMu > 1.0 || kQcdEle > 1.0) {
       for (int ifl = 0; ifl < 2; ++ifl) {
         if (!useFl[ifl]) continue; // flavour not in this fit
@@ -558,7 +571,7 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
       for (int i = 0; i < fp.getSize(); ++i) {
         const RooRealVar *x = (const RooRealVar *)fp.at(i);
         const TString n = x->GetName();
-        bool known = n.BeginsWith("r_") || n == "lumi" || n.BeginsWith("qcd_rate_") ||
+        bool known = n.BeginsWith("r_") || n == "lumi" || n == "ttbar_xsec" || n.BeginsWith("qcd_rate_") ||
                      n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm_");
         for (size_t il = 0; il < lheNames.size() && !known; ++il) known = (n == lheNames[il]);
         if (!known)
@@ -867,9 +880,10 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         if (std::fabs(pz.v - 1.0) > worst) { worst = std::fabs(pz.v - 1.0); worstName = "r_Z"; }
       }
       // constrained nuisances must come back at theta = 0 on the prefit Asimov
-      const char *nuisN[5] = {"qcd_rate_mu_Wp", "qcd_rate_mu_Wm",
-                              "qcd_rate_ele_Wp", "qcd_rate_ele_Wm", "lumi"};
-      for (int in2 = 0; in2 < 5; ++in2) {
+      const char *nuisN[6] = {"qcd_rate_mu_Wp", "qcd_rate_mu_Wm",
+                              "qcd_rate_ele_Wp", "qcd_rate_ele_Wm", "lumi",
+                              "ttbar_xsec"}; // ttbar since 2026-10-16
+      for (int in2 = 0; in2 < 6; ++in2) {
         Par t = GetPar(fra, nuisN[in2]);
         if (!t.ok) continue; // absent in free/legacy cards
         scsv << fitName << "_asimov," << nuisN[in2] << "_theta," << t.v << "," << t.e << ",,,\n";

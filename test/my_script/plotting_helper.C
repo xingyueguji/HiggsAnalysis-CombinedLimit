@@ -62,6 +62,9 @@ struct PlotStyle
     // from the info box (boxX1, boxY1-0.2, boxX2, boxY2-0.2). Set explicitly to
     // decouple the legend from the info box (e.g. legend lower-right on postfit).
     double legX1 = -1, legY1 = -1, legX2 = -1, legY2 = -1;
+    // number of legend columns in SaveNicePlot1D_WithBkg (opt-in, 2026-10-13:
+    // the lepton-pT stacks of mtandmet.C use 2 to make room for a taller info box)
+    int legNColumns = 1;
 
     // axis sizes
     double xTitleSize = 0.045, yTitleSize = 0.045;
@@ -986,7 +989,8 @@ static void SaveNicePlot1D_WithBkg(
         kMagenta - 3,
         kCyan + 1,
         kRed - 7,
-        kGray + 1}; // 6th/7th added so the 6 MC samples + ABCD QCD each get a distinct color
+        kGray + 1,  // 6th/7th added so the 6 MC samples + ABCD QCD each get a distinct color
+        kOrange + 3}; // 8th (2026-10-16): ttbar, appended LAST in the W stacks so the 7 above keep their colors
 
     for (int i = static_cast<int>(bkgs.size()) - 1; i >= 0; --i)
     {
@@ -1041,6 +1045,8 @@ static void SaveNicePlot1D_WithBkg(
                                legAuto ? ps.boxY2 - 0.2 : ps.legY2);
     leg->SetBorderSize(0);
     leg->SetFillStyle(0);
+    if (ps.legNColumns > 1)
+        leg->SetNColumns(ps.legNColumns);
 
     leg->AddEntry(h, "Data", "lep");
 

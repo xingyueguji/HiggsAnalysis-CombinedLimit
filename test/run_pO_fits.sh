@@ -105,8 +105,9 @@
 #                       sigma_W to a POI, its own workspace and its own output
 #                       dir contour/contour_<B>/ -- it overwrites nothing from
 #                       the nominal fit and the extraction never reads it.
-#                       Needs skim/output/gen_xsec_fid.txt; missing -> the pass
-#                       is skipped with a WARN, the other two still run.
+#                       Needs skim/output/gen_xsec_fid[_mt40].txt (the _mt40 one
+#                       for --disc leppt_mt40); missing -> the pass is skipped
+#                       with a WARN, the other two still run.
 #     --extract-only    (simfit/flavfit) re-run ONLY the extraction on an EXISTING
 #                       fits/ tree (no combine; e.g. on a downloaded fit after an
 #                       extractor change). Prefit integrals from the input copies
@@ -531,11 +532,20 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
   # --contour (2026-09-15): ask the card generator for the SECOND map file that
   # promotes the rapidity-inclusive sigma_W to a POI. It needs the gen fiducial
   # cross sections, which live in the ANALYSIS repo next to the plots dir
-  # (skim/output/gen_xsec_fid.txt, written by skim/gen_xsec.C and uploaded by
+  # (skim/output/gen_xsec_fid[_mt40].txt, written by skim/gen_xsec.C and uploaded by
   # sync_lxplus.sh). The card itself is unchanged either way.
   if [ "$CONTOUR" -eq 1 ]; then
     export SIGMA_POI=1
-    export GEN_XSEC_FID="${GEN_XSEC_FID:-$PO_PLOTS/../../skim/output/gen_xsec_fid.txt}"
+    # the gen fiducial SET of the discriminant (2026-10-13; = pODisc::GenFid in
+    # the analysis repo): leppt_mt40 is measured in the m_T > 40 fiducial
+    # volume (gen_xsec_fid_mt40.txt), met in the one without (gen_xsec_fid.txt).
+    # The analysis-side contour reads the same set, and its staleness gate
+    # rejects a scan baked with the other one.
+    case "$DISC" in
+      leppt_mt40) GEN_FID_TAG="_mt40" ;;
+      *)          GEN_FID_TAG="" ;;
+    esac
+    export GEN_XSEC_FID="${GEN_XSEC_FID:-$PO_PLOTS/../../skim/output/gen_xsec_fid${GEN_FID_TAG}.txt}"
     if [ ! -f "$GEN_XSEC_FID" ]; then
       # NOT fatal: the contour is one of three passes and the nominal fit must
       # not die because an optional input is missing.

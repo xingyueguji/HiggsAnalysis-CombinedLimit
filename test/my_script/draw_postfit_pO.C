@@ -93,14 +93,16 @@ void draw_postfit_pO(const char *fitDiagFile,
   TH1D *hData = (TH1D *)ref->Clone("postfit_data");
   hData->SetDirectory(0);
 
-  // process list + legend labels (stack order matches mtandmet.C)
+  // process list + legend labels (stack order matches mtandmet.C). ttbar
+  // (2026-10-16) is LAST so the entries before it keep their positional
+  // stack colours; a fit without it simply has no ttbar shape (skipped below).
   std::vector<std::string> procs, labels;
   if (isW) {
-    procs  = {"signal", "z", "ztau", "wtau", "qcd"};
-    labels = {"W signal", "DY", "DY #tau", "W #tau", "QCD (ABCD)"};
+    procs  = {"signal", "z", "ztau", "wtau", "qcd", "ttbar"};
+    labels = {"W signal", "DY", "DY #tau", "W #tau", "QCD (ABCD)", "t#bar{t}"};
   } else {
-    procs  = {"signal", "w", "wtau", "ztau"};
-    labels = {"Z signal", "W^{+}/W^{-}", "W^{+}/W^{-} #tau", "DY #tau"};
+    procs  = {"signal", "w", "wtau", "ztau", "ttbar"};
+    labels = {"Z signal", "W^{+}/W^{-}", "W^{+}/W^{-} #tau", "DY #tau", "t#bar{t}"};
   }
 
   std::vector<TH1 *> bkgs;

@@ -163,10 +163,15 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
   free scales `qcd_s{B,C,D}_<F>_<C>`, formula rateParam `(@0*@1/@2)` on the SR
   `qcd_abcd` template, reduced residual lnN. `w`/`wtau` under the Z peaks:
   frozen at absolute MC (0.03–0.06 events — negligible by measurement).
+- ttbar (2026-10-16): its own column `ttbar` (process id 20) in every W
+  channel, both Z peaks and CRB (inside the frozen `ewk` in CRC/CRD); no map
+  matches it, so it stays at absolute MC with `lumi` and its own
+  `ttbar_xsec` lnN (`TTBAR_LNN`, default 1.15) plus the shape rows its
+  sidecars list. The extractor reports `ttbar_xsec_theta`.
 - LHE shape systematics (2026-09-07, `LHE_SYST`): `nPDF` (EPPS21 via LHAPDF's
   `PDFSet.uncertainty()`), `qcdScale` (μR/μF envelope), `alphaS` (0.119/0.117
-  members) — one `shape` row each, flag `1` on `signal/z/ztau/wtau` (W) and
-  `zsig/w/wtau/ztau` (Z), `-` on the data-driven `qcd` and all CR columns;
+  members) — one `shape` row each, flag `1` on `signal/z/ztau/wtau/ttbar` (W) and
+  `zsig/w/wtau/ztau/ttbar` (Z), `-` on the data-driven `qcd` and all CR columns;
   templates `<dir>/<proc>_$SYSTEMATIC` (Up/Down) from the analysis repo's
   `combine_input_*.root`, listed in the `<input>_systs.txt` sidecar the
   generator reads. One name = one θ for the whole card (fully correlated). Group

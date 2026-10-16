@@ -130,11 +130,17 @@ upload_inputs() {
   # that promotes the rapidity-inclusive sigma_W to a POI. Lives outside
   # plotting/, hence its own transfer; absent is only a note (--contour then
   # errors with the path it looked for).
-  if [ -f "$ANA_LOCAL/skim/output/gen_xsec_fid.txt" ]; then
+  # One file per gen fiducial set since 2026-10-13: gen_xsec_fid.txt (met, no
+  # m_T cut) and gen_xsec_fid_mt40.txt (leppt_mt40, m_T > 40).
+  gfids=""
+  for g in gen_xsec_fid.txt gen_xsec_fid_mt40.txt; do
+    if [ -f "$ANA_LOCAL/skim/output/$g" ]; then gfids="$gfids $ANA_LOCAL/skim/output/$g"
+    else echo "[note] no skim/output/$g (run skim/run_gen_xsec.sh) -- --contour for its discriminant will not work remotely"; fi
+  done
+  if [ -n "$gfids" ]; then
     rmkdir "$ANA_LX/skim/output"
-    run "$ANA_LOCAL/skim/output/gen_xsec_fid.txt" "$LX:$ANA_LX/skim/output/" || err=1
-  else
-    echo "[note] no skim/output/gen_xsec_fid.txt (run skim/gen_xsec.C) -- --contour will not work remotely"
+    # shellcheck disable=SC2086
+    run $gfids "$LX:$ANA_LX/skim/output/" || err=1
   fi
 }
 

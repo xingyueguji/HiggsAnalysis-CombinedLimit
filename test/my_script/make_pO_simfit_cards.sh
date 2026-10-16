@@ -54,6 +54,15 @@
 #   w, wtau under the Z peaks: FROZEN at absolute MC (0.03-0.06 events vs
 #   ~250-370 signal; decision 2026-08-04 -- no scaling parameter; the lumi lnN
 #   does ride on them, consistently with "everything MC scales with L").
+#   ttbar (2026-10-16): the inclusive POWHEG ttbar background, its own column
+#   `ttbar` (process id 20) in every W channel, both Z peaks and CRB (abcd
+#   mode; in CRC/CRD it sits inside the frozen `ewk`). FROZEN at absolute MC:
+#   no map matches it (scale 1 -- it must ride neither r_<C>_y<i> nor r_Z),
+#   only the lumi lnN and its own normalization lnN `ttbar_xsec`, kappa
+#   TTBAR_LNN (default 1.15 = the sample's own inclusive scale envelope
+#   +13.3/-12.9% (+) EPPS21 ~3% at 68% CL, skim/output/lhe_weights_TT.txt),
+#   plus the shape rows its sidecars list (LHE theory -- area-normalized,
+#   shape only, so no double counting with ttbar_xsec -- and the lepton SFs).
 #   LHE SHAPE systematics (2026-09-07): the Combine inputs carry, for every MC
 #   process of every SR region, <process>_<syst>Up/Down built from the
 #   generator's per-event LHE weights (plotting/mtandmet.C + dileptonpeak.C
@@ -113,6 +122,7 @@
 #   signal = 0 (W signal)   zsig = -1 (DY signal under the Z peaks)
 #   z = 1   ztau = 2   wtau = 3   qcd = 4   w = 5
 #   wfix = 6   ewk = 7   w_y0..w_y11 = 8..19        (abcd-mode CRs only)
+#   ttbar = 20                                      (2026-10-16, every channel but CRC/CRD)
 # Note lab and fb are the SAME events rebinned -> they live in SEPARATE cards
 # (separate likelihoods), never combined with each other.  In abcd mode the
 # same CR channels appear in both cards, BUT the CRB w_y* shapes come from
@@ -180,13 +190,16 @@ QCD_WCR="${QCD_WCR:-float}"        # abcd-mode CRB W content: float (per-y w_y*
                                    #  mapped to the r POIs) | frozen (wfix at
                                    #  absolute MC; add ~2%/1% residual to kappa)
 LUMI_LNN="${LUMI_LNN:-1.03}"       # +-3% on kLumi_invnb = 46.5 nb^-1 (all MC)
+TTBAR_LNN="${TTBAR_LNN:-1.15}"     # ttbar_xsec: normalization of the frozen ttbar MC
+                                   #  (scale +13.3/-12.9% (+) EPPS21 ~3%, 68% CL; see header)
 LHE_SYST="${LHE_SYST:-auto}"       # auto | off | comma list (see header)
 SF_TRIG_CORR="${SF_TRIG_CORR:-auto}"    # auto (the muon W sidecar's '#! muTrig corr' directive, coherent if
                                         #  absent) | perbin | coherent -- see header
 SIGMA_POI="${SIGMA_POI:-0}"        # 1 -> ALSO write t2w_maps_simfit_<B>_sigma.txt, the
                                    #  reparametrization that makes the rapidity-inclusive
                                    #  sigma_W a POI (same card; see write_sigma_maps)
-GEN_XSEC_FID="${GEN_XSEC_FID:-}"   # gen fiducial sigma sidecar (skim/output/gen_xsec_fid.txt);
+GEN_XSEC_FID="${GEN_XSEC_FID:-}"   # gen fiducial sigma sidecar (skim/output/gen_xsec_fid[_mt40].txt,
+                                   #  the set of the discriminant -- run_pO_fits.sh picks it);
                                    #  required by SIGMA_POI=1, ignored otherwise
 SIMFIT_FLAVS="${SIMFIT_FLAVS:-mu ele}"  # the lepton flavours in the card (2026-09-22):
                                         #  "mu ele" = the grand fit, mu | ele = a per-flavour fit
@@ -375,6 +388,7 @@ gen_simfit_card() {  # $1 = lab | fb
   SQMWP="qcd_rate_mu_Wp   lnN"; SQMWM="qcd_rate_mu_Wm   lnN"
   SQEWP="qcd_rate_ele_Wp  lnN"; SQEWM="qcd_rate_ele_Wm  lnN"
   SLUMI="lumi             lnN"
+  STTX="ttbar_xsec       lnN"   # ttbar normalization (2026-10-16), the ttbar columns only
   # LHE shape rows, one per systematic (entries appended by lhe_append)
   SLHE=()
   i=0; for s in $LHENAMES; do SLHE[$i]="$(printf '%-17s%s' "$s" 'shape')"; i=$((i+1)); done
@@ -395,23 +409,24 @@ shapes signal   ${CH} ${WF} ${R}/signal${SY:+ ${R}/signal$SY}
 shapes z        ${CH} ${WF} ${R}/z${SY:+ ${R}/z$SY}
 shapes ztau     ${CH} ${WF} ${R}/ztau${SY:+ ${R}/ztau$SY}
 shapes wtau     ${CH} ${WF} ${R}/wtau${SY:+ ${R}/wtau$SY}
+shapes ttbar    ${CH} ${WF} ${R}/ttbar${SY:+ ${R}/ttbar$SY}
 shapes qcd      ${CH} ${WF} ${R}/${QPATH}${SY:+ ${R}/${QPATH}$SY}"
         BINL="$BINL $CH"; OBSL="$OBSL -1"
-        MB="$MB $CH $CH $CH $CH $CH"
-        MP="$MP signal z ztau wtau qcd"
-        MI="$MI 0 1 2 3 4"
-        MR="$MR -1 -1 -1 -1 -1"
+        MB="$MB $CH $CH $CH $CH $CH $CH"
+        MP="$MP signal z ztau wtau ttbar qcd"
+        MI="$MI 0 1 2 3 20 4"
+        MR="$MR -1 -1 -1 -1 -1 -1"
         # the qcd column is named by its HISTOGRAM ($QPATH: qcd_abcd in abcd
         # mode) so a sidecar row on the data-driven template (qcdFF_*) finds it;
         # CURC lets a '<hist>@<charge>' token restrict it to this charge
         CURC="$C"
-        lhe_append W "$F" signal z ztau wtau "$QPATH"
+        lhe_append W "$F" signal z ztau wtau ttbar "$QPATH"
         CURC=""
         if [ "$QCD_MODE" = "free" ]; then
           RP="${RP}
 qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
-          SQMWP="$SQMWP - - - - -"; SQMWM="$SQMWM - - - - -"
-          SQEWP="$SQEWP - - - - -"; SQEWM="$SQEWM - - - - -"
+          SQMWP="$SQMWP - - - - - -"; SQMWM="$SQMWM - - - - - -"
+          SQEWP="$SQEWP - - - - - -"; SQEWM="$SQEWM - - - - - -"
         else
           # lnN mode: the full ABCD kappa; abcd mode: the REDUCED residual
           # (the same 4 row names, on the SR qcd columns only -- never on the
@@ -421,7 +436,7 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
           else
             K="$QCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_LNN_ELE"
           fi
-          H=" - - - - ${K}"; N=" - - - - -"
+          H=" - - - - - ${K}"; N=" - - - - - -"
           case "${F}_${C}" in
             mu_Wp)  SQMWP="$SQMWP$H"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$N" ;;
             mu_Wm)  SQMWP="$SQMWP$N"; SQMWM="$SQMWM$H"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$N" ;;
@@ -429,7 +444,8 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
             ele_Wm) SQMWP="$SQMWP$N"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$H" ;;
           esac
         fi
-        SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} -"
+        SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} -"
+        STTX="$STTX - - - - ${TTBAR_LNN} -"
         NCH=$((NCH+1))
       done
     done
@@ -445,16 +461,18 @@ shapes data_obs ${CH} ${ZF} Z_incl/data_obs
 shapes zsig     ${CH} ${ZF} Z_incl/signal${SY:+ Z_incl/signal$SY}
 shapes w        ${CH} ${ZF} Z_incl/w${SY:+ Z_incl/w$SY}
 shapes wtau     ${CH} ${ZF} Z_incl/wtau${SY:+ Z_incl/wtau$SY}
-shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
+shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}
+shapes ttbar    ${CH} ${ZF} Z_incl/ttbar${SY:+ Z_incl/ttbar$SY}"
     BINL="$BINL $CH"; OBSL="$OBSL -1"
-    MB="$MB $CH $CH $CH $CH"
-    MP="$MP zsig w wtau ztau"
-    MI="$MI -1 5 3 2"
-    MR="$MR -1 -1 -1 -1"
-    SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
-    SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
-    SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
-    lhe_append Z "$F" signal w wtau ztau
+    MB="$MB $CH $CH $CH $CH $CH"
+    MP="$MP zsig w wtau ztau ttbar"
+    MI="$MI -1 5 3 2 20"
+    MR="$MR -1 -1 -1 -1 -1"
+    SQMWP="$SQMWP - - - - -"; SQMWM="$SQMWM - - - - -"
+    SQEWP="$SQEWP - - - - -"; SQEWM="$SQEWM - - - - -"
+    SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
+    STTX="$STTX - - - - ${TTBAR_LNN}"
+    lhe_append Z "$F" signal w wtau ztau ttbar
     NCH=$((NCH+1))
   done
 
@@ -463,8 +481,9 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
   # scales qcd_s{B,C,D} float the QCD counts; the SR qcd is scaled by the
   # formula rateParam (@0*@1/@2) -- the ABCD relation inside the likelihood.
   # ALIGNMENT RULE: every new (channel, process) column appends exactly one
-  # entry to MB/MP/MI/MR AND to all five systematics rows in the same block
-  # AND (via lhe_append CR ..., always '-') to every LHE shape row.
+  # entry to MB/MP/MI/MR AND to all six systematics rows in the same block
+  # (lumi, ttbar_xsec, the 4 QCD lnN) AND (via lhe_append CR ..., always '-')
+  # to every LHE shape row.
   if [ "$QCD_MODE" = "abcd" ]; then
     for F in $FLAVS; do
       if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
@@ -475,28 +494,32 @@ shapes ztau     ${CH} ${ZF} Z_incl/ztau${SY:+ Z_incl/ztau$SY}"
 shapes data_obs ${CH} ${WF} ${C}_CRB/data_obs
 shapes qcd      ${CH} ${WF} ${C}_CRB/qcd
 shapes z        ${CH} ${WF} ${C}_CRB/z
-shapes ztau     ${CH} ${WF} ${C}_CRB/ztau"
+shapes ztau     ${CH} ${WF} ${C}_CRB/ztau
+shapes ttbar    ${CH} ${WF} ${C}_CRB/ttbar"
         BINL="$BINL $CH"; OBSL="$OBSL -1"
+        # ttbar in CRB (2026-10-16): frozen like the SR ttbar -- lumi + ttbar_xsec
         if [ "$QCD_WCR" = "frozen" ]; then
           SHAPES="${SHAPES}
 shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
+          MB="$MB $CH $CH $CH $CH $CH"
+          MP="$MP qcd z ztau ttbar wfix"
+          MI="$MI 4 1 2 20 6"
+          MR="$MR -1 -1 -1 -1 -1"
+          SQMWP="$SQMWP - - - - -"; SQMWM="$SQMWM - - - - -"
+          SQEWP="$SQEWP - - - - -"; SQEWM="$SQEWM - - - - -"
+          SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
+          STTX="$STTX - - - ${TTBAR_LNN} -"
+          lhe_append CR "$F" qcd z ztau ttbar wfix
+        else
           MB="$MB $CH $CH $CH $CH"
-          MP="$MP qcd z ztau wfix"
-          MI="$MI 4 1 2 6"
+          MP="$MP qcd z ztau ttbar"
+          MI="$MI 4 1 2 20"
           MR="$MR -1 -1 -1 -1"
           SQMWP="$SQMWP - - - -"; SQMWM="$SQMWM - - - -"
           SQEWP="$SQEWP - - - -"; SQEWM="$SQEWM - - - -"
           SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN}"
-          lhe_append CR "$F" qcd z ztau wfix
-        else
-          MB="$MB $CH $CH $CH"
-          MP="$MP qcd z ztau"
-          MI="$MI 4 1 2"
-          MR="$MR -1 -1 -1"
-          SQMWP="$SQMWP - - -"; SQMWM="$SQMWM - - -"
-          SQEWP="$SQEWP - - -"; SQEWM="$SQEWM - - -"
-          SLUMI="$SLUMI - ${LUMI_LNN} ${LUMI_LNN}"
-          lhe_append CR "$F" qcd z ztau
+          STTX="$STTX - - - ${TTBAR_LNN}"
+          lhe_append CR "$F" qcd z ztau ttbar
           # per-y W content: card process w_y<i> <- histogram w_<B>_y<i>
           # (lab and fb cards MUST wire their own split -- see the header note)
           PIDX=8
@@ -506,12 +529,15 @@ shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
             MB="$MB $CH"; MP="$MP w_y${iy}"; MI="$MI $PIDX"; MR="$MR -1"
             SQMWP="$SQMWP -"; SQMWM="$SQMWM -"; SQEWP="$SQEWP -"; SQEWM="$SQEWM -"
             SLUMI="$SLUMI ${LUMI_LNN}"
+            STTX="$STTX -"
             lhe_append CR "$F" w_y${iy}
             PIDX=$((PIDX+1))
           done
         fi
         NCH=$((NCH+1))
         # --- CRC (anti-iso, m_T>40) and CRD (anti-iso, m_T<30): one frozen ewk ---
+        # (ewk = every MC sample, ttbar included since 2026-10-16: lumi only --
+        #  the ttbar part is ~0.1-1% of ewk, so no ttbar_xsec entry here)
         for RG in CRC CRD; do
           CH="${F}_${C}_${RG}"
           SHAPES="${SHAPES}
@@ -526,6 +552,7 @@ shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
           SQMWP="$SQMWP - -"; SQMWM="$SQMWM - -"
           SQEWP="$SQEWP - -"; SQEWM="$SQEWM - -"
           SLUMI="$SLUMI - ${LUMI_LNN}"
+          STTX="$STTX - -"
           lhe_append CR "$F" qcd ewk
           NCH=$((NCH+1))
         done
@@ -542,9 +569,10 @@ qcd_abcd_${F}_${C} rateParam ${F}_${C}_${B}_y* qcd (@0*@1/@2) qcd_sB_${F}_${C},q
     done
   fi
 
-  # ---- systematics block: lumi always; the 4 QCD lnN rows only in lnN mode ----
+  # ---- systematics block: lumi + ttbar_xsec always; the 4 QCD lnN rows only in lnN mode ----
   SYST="
-${SLUMI}"
+${SLUMI}
+${STTX}"
   if [ "$QCD_MODE" != "free" ]; then
     # only the rows of the flavours IN the card: in a per-flavour card the
     # other flavour's two rows would be all '-' (a nuisance touching nothing)
@@ -630,7 +658,8 @@ qcdff group = ${QFK}"
 # + global r_Z on all DY-related MC) is applied at text2workspace time via
 # multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
 # ${QDESC}; lumi lnN ${LUMI_LNN} on all MC (not qcd);
-# w/wtau under the Z peaks FROZEN at absolute MC (negligible: <0.1 evt)."
+# w/wtau under the Z peaks FROZEN at absolute MC (negligible: <0.1 evt);
+# ttbar FROZEN at absolute MC everywhere, ttbar_xsec lnN ${TTBAR_LNN}."
   else
     CARDHEAD="# Auto-generated by make_pO_simfit_cards.sh -- PER-FLAVOUR SIMULTANEOUS FIT (${FLAVS} only),
 # ${B} binning, ${DISCLABEL} W discriminant.  24 W channels (${FLAVS} x {Wp,Wm} x
@@ -638,7 +667,8 @@ qcdff group = ${QFK}"
 # (r_<C>_y<i> of this flavour alone, + r_Z on all DY-related MC) is applied at
 # text2workspace time via multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
 # ${QDESC}; lumi lnN ${LUMI_LNN} on all MC (not qcd);
-# w/wtau under the Z peak FROZEN at absolute MC (negligible: <0.1 evt)."
+# w/wtau under the Z peak FROZEN at absolute MC (negligible: <0.1 evt);
+# ttbar FROZEN at absolute MC everywhere, ttbar_xsec lnN ${TTBAR_LNN}."
   fi
 
   cat > "$CARD" <<EOF
@@ -720,7 +750,8 @@ EOF
 # inside a 95% CL contour; the ratio form keeps every r_i > 0 by construction.
 #
 # The per-bin gen fiducial cross sections G_i come from the analysis repo's
-# skim/output/gen_xsec_fid.txt (written by skim/gen_xsec.C) -- they must be
+# skim/output/gen_xsec_fid[_mt40].txt (written by skim/gen_xsec.C; the _mt40
+# set = m_T > 40, for leppt_mt40, since 2026-10-13) -- they must be
 # baked in because sigma_W is that specific combination. NOTE they are the
 # NOMINAL-PDF values, the same approximation plotting/xsec_fiducial.C makes.
 #
@@ -803,6 +834,7 @@ cat > "$OUTDIR/qcd_lnn_kappas.txt" <<EOF
 kQcdMu $KQM
 kQcdEle $KQE
 kLumi $LUMI_LNN
+kTtbar $TTBAR_LNN
 qcdMode $QCD_MODE
 lheSysts $LHELIST
 sfTrigCorr $SF_TRIG_CORR
@@ -813,5 +845,5 @@ echo "[make_pO_simfit_cards] done -> ${OUTDIR} (flavours: ${FLAVS}; W discrimina
 KMSG=""
 if [ "$USE_MU" = 1 ];  then KMSG="mu ${KQM}"; fi
 if [ "$USE_ELE" = 1 ]; then KMSG="${KMSG:+$KMSG / }ele ${KQE}"; fi
-echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (${KMSG}); lumi lnN ${LUMI_LNN}"
+echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (${KMSG}); lumi lnN ${LUMI_LNN}; ttbar_xsec lnN ${TTBAR_LNN}"
 echo "[make_pO_simfit_cards] shape systematics: theory [${THK:-none}] lepton SF [${SFALL:-none}] fake-factor QCD [${QFK:-none}] (LHE_SYST=${LHE_SYST}, SF_TRIG_CORR=${SF_TRIG_CORR} from ${SF_TRIG_SRC})"
