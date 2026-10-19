@@ -11,7 +11,9 @@
 #                                     #  lepton-pT variant W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
 #   ./sync_lxplus.sh download         # pull, for every out-tree present
-#                                     # (pO_fit_out[_leppt[_mt40]]) and for each
+#                                     # (pO_fit_out[_leppt[_mt40]], and since
+#                                     # 2026-10-19 pO_fit_out_leppt_mt40_abcdy =
+#                                     # the QCD_MODE=abcdy fit) and for each
 #                                     # fit in it -- simfit/ (grand) and, when
 #                                     # run, simfit_mu/ + simfit_ele/ (flavfit,
 #                                     # 2026-09-22; same layout, same pulls):
@@ -118,9 +120,14 @@ upload_inputs() {
   done
   # the LHE shape-systematics sidecars (2026-09-07, <input>_systs.txt): the card
   # generator reads them next to the inputs, so they must travel together
+  # + the abcdy group sidecars (2026-10-19, <W input>_abcdy.txt, written by
+  # plotting/mtandmet.C next to combine_input_W_leppt_mt40.root): QCD_MODE=abcdy
+  # refuses to build cards without them
   local sc
   for f in $SEND; do
     sc="${f%.root}_systs.txt"
+    [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
+    sc="${f%.root}_abcdy.txt"
     [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
   done
   rmkdir "$ANA_LX/plotting"
@@ -164,8 +171,9 @@ upload_scripts() {
 
 download_results() {
   # one out-tree per discriminant: "" (PF MET), _leppt, _leppt_mt40
+  # + _leppt_mt40_abcdy (2026-10-19): the QCD_MODE=abcdy fit's own tree
   local got=0
-  for sfx in "" "_leppt" "_leppt_mt40"; do
+  for sfx in "" "_leppt" "_leppt_mt40" "_leppt_mt40_abcdy"; do
     local tree="pO_fit_out${sfx}"
     echo "== download fit results <- $LX:$FORK_LX/test/$tree/ =="
     # (the legacy per-channel trees <tree>/{mu,ele}/ are no longer pulled: that
@@ -326,6 +334,8 @@ case "$CMD" in
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
     echo "    # backup discriminant, PF MET (defaults to QCD_MODE=lnN):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc met"
+    echo "    # OPT-IN rapidity-resolved in-fit ABCD (fwd/bwd/cen groups) -> its own tree pO_fit_out_leppt_mt40_abcdy/:"
+    echo "    QCD_MODE=abcdy PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
     echo "    # then impacts + covariance plots (pulled by 'download'; --fit mu|ele for flavfit):"
     echo "    ./run_pO_impacts.sh --disc leppt_mt40" ;;
   download)

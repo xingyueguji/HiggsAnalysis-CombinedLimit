@@ -48,6 +48,24 @@
 #   (QCD_WCR=frozen).  The qcd_rate_* lnN rows stay, with the REDUCED kappas
 #   (window (+) FF-shift only -- stat is profiled in-fit, plane transport does
 #   not apply; derived in correction/logs/qcd_abcd_*.log, 2026-08-23).
+#   QCD_MODE=abcdy (2026-10-19, OPT-IN, leppt_mt40 ONLY): the in-fit ABCD done
+#   PER RAPIDITY GROUP. The groups come from the input's group sidecar
+#   <W input minus .root>_abcdy.txt (plotting/mtandmet.C, lines
+#   '<lab|fb> <group> <bin indices>'; today fwd = y10,y11 | bwd = y0,y1 |
+#   cen = y2..y9, correction/abcd_ygroups.h) -- abcdy refuses to run without
+#   it, and the muon and electron sidecars must agree. Per (flavour, charge,
+#   group g): CR channels <F>_<C>_<g>_CR{B,C,D} from the input dirs
+#   <C>_<B>_<g>_CR* (the group's own control regions; FB-binned planes in the
+#   fb card), free scales qcd_s{B,C,D}_<F>_<C>_<g>, and the formula rateParam
+#   qcd_abcd_<F>_<C>_<g> = (@0*@1/@2) written once PER SR CHANNEL of the group
+#   under the same name with the identical formula (Combine builds ONE function
+#   from the repeated lines: ModelTools.doRateParams skips a name that already
+#   exists). The SR qcd column reads qcd_abcdy (each group carrying its own
+#   B_g*C40_g/D_g prefit total). The residual lnN qcd_rate_<F>_<C> stays one
+#   per (flavour, charge), shared by its groups, with the abcd kappas; the CRB
+#   W parts w_y<i> of a group map to r_<C>_y<i> (maps and sigma maps name the
+#   group channel). The kappa sidecar gains a qcdGroups line (read back by
+#   run_pO_fits.sh for the extractor). abcd/lnN/free cards are unchanged.
 #   lumi lnN (2026-08-17): one global nuisance on EVERY MC template (signal, z,
 #   ztau, wtau, zsig, and the CR wfix/w_y*/ewk -- NOT the data-driven qcd),
 #   +-3% on L = 46.5 nb^-1.
@@ -121,7 +139,7 @@
 # consistent across channels:
 #   signal = 0 (W signal)   zsig = -1 (DY signal under the Z peaks)
 #   z = 1   ztau = 2   wtau = 3   qcd = 4   w = 5
-#   wfix = 6   ewk = 7   w_y0..w_y11 = 8..19        (abcd-mode CRs only)
+#   wfix = 6   ewk = 7   w_y0..w_y11 = 8..19        (abcd/abcdy-mode CRs only; w_y<i> = 8+i)
 #   ttbar = 20                                      (2026-10-16, every channel but CRC/CRD)
 # Note lab and fb are the SAME events rebinned -> they live in SEPARATE cards
 # (separate likelihoods), never combined with each other.  In abcd mode the
@@ -227,12 +245,60 @@ for pair in "$USE_MU|$WMU" "$USE_MU|$ZMU" "$USE_ELE|$WEL" "$USE_ELE|$ZEL"; do
   [ -f "${pair#*|}" ] || { echo "[make_pO_simfit_cards] ERROR input not found: ${pair#*|}" >&2; exit 2; }
 done
 
-if [ "$QCD_MODE" = "abcd" ] && [ "$DISC" != "leppt_mt40" ]; then
-  echo "[make_pO_simfit_cards] ERROR: QCD_MODE=abcd requires the leppt_mt40 discriminant" >&2
-  echo "  (the qcd_abcd template + CR dirs exist only in combine_input_W_leppt_mt40.root;" >&2
+case "$QCD_MODE" in
+  lnN|free|abcd|abcdy) ;;
+  *) echo "[make_pO_simfit_cards] ERROR QCD_MODE='$QCD_MODE' (lnN | free | abcd | abcdy)" >&2; exit 2 ;;
+esac
+if { [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; } && [ "$DISC" != "leppt_mt40" ]; then
+  echo "[make_pO_simfit_cards] ERROR: QCD_MODE=$QCD_MODE requires the leppt_mt40 discriminant" >&2
+  echo "  (the qcd_abcd[y] templates + CR dirs exist only in combine_input_W_leppt_mt40.root;" >&2
   echo "   the met fit's QCD is already data-constrained in-fit by its low-MET region)" >&2
   exit 2
 fi
+
+# ---- abcdy (2026-10-19): the rapidity groups, from the W inputs' group sidecar ----
+# <W input minus .root>_abcdy.txt (plotting/mtandmet.C writes it ONLY when every
+# abcdy object is in the input): '<lab|fb> <group> <bin indices>' lines. The
+# sidecars of the flavours in the card must agree (one set of map regexes);
+# every binning must place each of the 12 bins in exactly one group.
+YSC=""
+if [ "$QCD_MODE" = "abcdy" ]; then
+  for pair in "$USE_MU|$WMU" "$USE_ELE|$WEL"; do
+    [ "${pair%%|*}" = 1 ] || continue
+    sc="${pair#*|}"; sc="${sc%.root}_abcdy.txt"
+    if [ ! -f "$sc" ]; then
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: group sidecar not found: $sc" >&2
+      echo "  (regenerate the inputs with plotting/run_combine_inputs.sh after correction/run_qcd_abcd.sh;" >&2
+      echo "   mtandmet.C writes it only when qcd_abcdy and every group CR dir are in the input)" >&2
+      exit 2
+    fi
+    if [ -z "$YSC" ]; then YSC="$sc"
+    elif [ "$(grep -v '^#' "$YSC")" != "$(grep -v '^#' "$sc")" ]; then
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: the group sidecars disagree: $YSC vs $sc" >&2; exit 2
+    fi
+  done
+  for Bchk in lab fb; do
+    chk=$(awk -v B="$Bchk" '!/^#/ && NF > 0 && $1 == B {
+            ng++; if ($2 !~ /^[A-Za-z0-9]+$/ || seen[$2]++) bad = 1
+            for (i = 3; i <= NF; i++) { if ($i !~ /^[0-9]+$/ || $i + 0 > 11) bad = 1; c[$i + 0]++ } }
+          END { for (y = 0; y < 12; y++) if (c[y] != 1) bad = 1; print (ng > 0 && !bad) ? "ok" : "bad" }' "$YSC")
+    if [ "$chk" != "ok" ]; then
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: $YSC: the $Bchk groups do not place each of the 12 bins in exactly one group" >&2
+      exit 2
+    fi
+  done
+  echo "[make_pO_simfit_cards] abcdy rapidity groups from $(basename "$YSC"):"
+  grep -v '^#' "$YSC" | sed 's/^/    /'
+fi
+ygrp_names() {  # $1 = lab|fb -> the group names, sidecar order
+  awk -v B="$1" '!/^#/ && NF > 0 && $1 == B {print $2}' "$YSC"
+}
+ygrp_bins() {   # $1 = lab|fb, $2 = group -> its bin indices, space separated
+  awk -v B="$1" -v G="$2" '!/^#/ && $1 == B && $2 == G {for (i = 3; i <= NF; i++) printf "%s%s", (i > 3 ? " " : ""), $i; print ""}' "$YSC"
+}
+ygrp_of() {     # $1 = lab|fb, $2 = bin index -> its group
+  awk -v B="$1" -v Y="$2" '!/^#/ && $1 == B {for (i = 3; i <= NF; i++) if ($i == Y) {print $2; exit}}' "$YSC"
+}
 
 # ---- shape systematics: the UNION of the four sidecars, per-INPUT process lists ----
 # Sidecar format (plotting/mtandmet.C, dileptonpeak.C): '# comment' lines and
@@ -344,7 +410,8 @@ SY=""; [ "$NLHE" -gt 0 ] && SY='_$SYSTEMATIC'
 #   $1 = W | Z | CR (which input's list applies; CR = never), $2 = mu | ele
 #   (which flavour's input), $3.. = the HISTOGRAM names of the columns in MP
 #   order (zsig -> signal; the SR qcd column -> $QPATH, i.e. qcd_abcd in abcd
-#   mode).
+#   mode, qcd_abcdy in abcdy mode -- the electron sidecar lists the qcdFF rows
+#   as 'qcdFF_ele_Wp qcd_abcd@Wp qcd_abcdy@Wp', so either column finds it).
 # A sidecar process token <hist>@<charge> (2026-09-29, the per-charge
 # fake-factor slopes) matches only while CURC -- set by the calling block to
 # the channel's charge, empty outside the W channels -- equals <charge>.
@@ -397,7 +464,10 @@ gen_simfit_card() {  # $1 = lab | fb
   # ---- 48 W channels ----------------------------------------------------------
   # abcd mode fits the A0-normalized template (7th input-file object) so the
   # formula rateParam (sB*sC/sD, init 1) needs no baked constants.
+  # (abcdy: qcd_abcdy = the same shape, each rapidity group at its own
+  #  B_g*C40_g/D_g, scaled by the group's formula)
   QPATH="qcd"; [ "$QCD_MODE" = "abcd" ] && QPATH="qcd_abcd"
+  [ "$QCD_MODE" = "abcdy" ] && QPATH="qcd_abcdy"
   for F in $FLAVS; do
     if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
     for C in Wp Wm; do
@@ -431,7 +501,9 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
           # lnN mode: the full ABCD kappa; abcd mode: the REDUCED residual
           # (the same 4 row names, on the SR qcd columns only -- never on the
           # CR qcd, whose yields are measurements the scales float).
-          if [ "$QCD_MODE" = "abcd" ]; then
+          # (abcdy: the same reduced kappa, ONE row per (flavour, charge)
+          #  shared by its rapidity groups)
+          if [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; then
             K="$QCD_ABCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_ABCD_LNN_ELE"
           else
             K="$QCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_LNN_ELE"
@@ -476,7 +548,7 @@ shapes ttbar    ${CH} ${ZF} Z_incl/ttbar${SY:+ Z_incl/ttbar$SY}"
     NCH=$((NCH+1))
   done
 
-  # ---- 12 ABCD control-region channels (QCD_MODE=abcd only) -------------------
+  # ---- ABCD control-region channels (QCD_MODE=abcd: 12; abcdy: 36) -----------
   # Counting channels (1-bin templates from plotting/mtandmet.C). The free
   # scales qcd_s{B,C,D} float the QCD counts; the SR qcd is scaled by the
   # formula rateParam (@0*@1/@2) -- the ABCD relation inside the likelihood.
@@ -484,23 +556,35 @@ shapes ttbar    ${CH} ${ZF} Z_incl/ttbar${SY:+ Z_incl/ttbar$SY}"
   # entry to MB/MP/MI/MR AND to all six systematics rows in the same block
   # (lumi, ttbar_xsec, the 4 QCD lnN) AND (via lhe_append CR ..., always '-')
   # to every LHE shape row.
-  if [ "$QCD_MODE" = "abcd" ]; then
+  # The CR "groups" (2026-10-19): abcd = ONE rapidity-inclusive set per
+  # (flavour, charge) -- pseudo-group "-": input dirs <C>_CR*, channels
+  # <F>_<C>_CR*, scales qcd_s*_<F>_<C>, one formula line over <F>_<C>_<B>_y*
+  # (the text below is byte-identical to the pre-abcdy one); abcdy = one set
+  # per rapidity group of the sidecar: dirs <C>_<B>_<g>_CR*, channels
+  # <F>_<C>_<g>_CR*, scales qcd_s*_<F>_<C>_<g>, the CRB W parts of the
+  # group's bins only, and the formula repeated on each SR channel of the
+  # group under ONE name.
+  if [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; then
+    if [ "$QCD_MODE" = "abcd" ]; then CRGROUPS="-"; else CRGROUPS=$(ygrp_names "$B"); fi
     for F in $FLAVS; do
       if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
       for C in Wp Wm; do
+       for G in $CRGROUPS; do
+        if [ "$G" = "-" ]; then GS=""; DP="${C}"; GBINS="$YBINS"
+        else GS="_${G}"; DP="${C}_${B}_${G}"; GBINS=$(ygrp_bins "$B" "$G"); fi
         # --- CRB: iso-pass, m_T<30 (EWK ~10-20%: z/ztau ride r_Z; W floats or freezes) ---
-        CH="${F}_${C}_CRB"
+        CH="${F}_${C}${GS}_CRB"
         SHAPES="${SHAPES}
-shapes data_obs ${CH} ${WF} ${C}_CRB/data_obs
-shapes qcd      ${CH} ${WF} ${C}_CRB/qcd
-shapes z        ${CH} ${WF} ${C}_CRB/z
-shapes ztau     ${CH} ${WF} ${C}_CRB/ztau
-shapes ttbar    ${CH} ${WF} ${C}_CRB/ttbar"
+shapes data_obs ${CH} ${WF} ${DP}_CRB/data_obs
+shapes qcd      ${CH} ${WF} ${DP}_CRB/qcd
+shapes z        ${CH} ${WF} ${DP}_CRB/z
+shapes ztau     ${CH} ${WF} ${DP}_CRB/ztau
+shapes ttbar    ${CH} ${WF} ${DP}_CRB/ttbar"
         BINL="$BINL $CH"; OBSL="$OBSL -1"
         # ttbar in CRB (2026-10-16): frozen like the SR ttbar -- lumi + ttbar_xsec
         if [ "$QCD_WCR" = "frozen" ]; then
           SHAPES="${SHAPES}
-shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
+shapes wfix     ${CH} ${WF} ${DP}_CRB/wfix"
           MB="$MB $CH $CH $CH $CH $CH"
           MP="$MP qcd z ztau ttbar wfix"
           MI="$MI 4 1 2 20 6"
@@ -522,16 +606,16 @@ shapes wfix     ${CH} ${WF} ${C}_CRB/wfix"
           lhe_append CR "$F" qcd z ztau ttbar
           # per-y W content: card process w_y<i> <- histogram w_<B>_y<i>
           # (lab and fb cards MUST wire their own split -- see the header note)
-          PIDX=8
-          for iy in $YBINS; do
+          # process index 8+i for w_y<i> (abcdy: only the group's bins)
+          for iy in $GBINS; do
+            PIDX=$((8+iy))
             SHAPES="${SHAPES}
-shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
+shapes w_y${iy}   ${CH} ${WF} ${DP}_CRB/w_${B}_y${iy}"
             MB="$MB $CH"; MP="$MP w_y${iy}"; MI="$MI $PIDX"; MR="$MR -1"
             SQMWP="$SQMWP -"; SQMWM="$SQMWM -"; SQEWP="$SQEWP -"; SQEWM="$SQEWM -"
             SLUMI="$SLUMI ${LUMI_LNN}"
             STTX="$STTX -"
             lhe_append CR "$F" w_y${iy}
-            PIDX=$((PIDX+1))
           done
         fi
         NCH=$((NCH+1))
@@ -539,11 +623,11 @@ shapes w_y${iy}   ${CH} ${WF} ${C}_CRB/w_${B}_y${iy}"
         # (ewk = every MC sample, ttbar included since 2026-10-16: lumi only --
         #  the ttbar part is ~0.1-1% of ewk, so no ttbar_xsec entry here)
         for RG in CRC CRD; do
-          CH="${F}_${C}_${RG}"
+          CH="${F}_${C}${GS}_${RG}"
           SHAPES="${SHAPES}
-shapes data_obs ${CH} ${WF} ${C}_${RG}/data_obs
-shapes qcd      ${CH} ${WF} ${C}_${RG}/qcd
-shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
+shapes data_obs ${CH} ${WF} ${DP}_${RG}/data_obs
+shapes qcd      ${CH} ${WF} ${DP}_${RG}/qcd
+shapes ewk      ${CH} ${WF} ${DP}_${RG}/ewk"
           BINL="$BINL $CH"; OBSL="$OBSL -1"
           MB="$MB $CH $CH"
           MP="$MP qcd ewk"
@@ -559,12 +643,25 @@ shapes ewk      ${CH} ${WF} ${C}_${RG}/ewk"
         # --- the three free scales + the functional SR multiplier -------------
         # The formula's ONLY args are the scales (init 1 each), and the SR
         # template total is B0*C40/D0 exactly, so prefit == the ABCD prediction
-        # and Asimov closure demands all three scales = 1.
+        # and Asimov closure demands all three scales = 1. (abcdy: per group,
+        # the group's qcd_abcdy total is B0_g*C40_g/D0_g [x A0ff/A0 for e].)
         RP="${RP}
-qcd_sB_${F}_${C} rateParam ${F}_${C}_CRB qcd 1 [0,10]
-qcd_sC_${F}_${C} rateParam ${F}_${C}_CRC qcd 1 [0,10]
-qcd_sD_${F}_${C} rateParam ${F}_${C}_CRD qcd 1 [0,10]
-qcd_abcd_${F}_${C} rateParam ${F}_${C}_${B}_y* qcd (@0*@1/@2) qcd_sB_${F}_${C},qcd_sC_${F}_${C},qcd_sD_${F}_${C}"
+qcd_sB_${F}_${C}${GS} rateParam ${F}_${C}${GS}_CRB qcd 1 [0,10]
+qcd_sC_${F}_${C}${GS} rateParam ${F}_${C}${GS}_CRC qcd 1 [0,10]
+qcd_sD_${F}_${C}${GS} rateParam ${F}_${C}${GS}_CRD qcd 1 [0,10]"
+        FARGS="qcd_sB_${F}_${C}${GS},qcd_sC_${F}_${C}${GS},qcd_sD_${F}_${C}${GS}"
+        if [ -z "$GS" ]; then
+          RP="${RP}
+qcd_abcd_${F}_${C} rateParam ${F}_${C}_${B}_y* qcd (@0*@1/@2) ${FARGS}"
+        else
+          # one line per SR channel of the group, SAME name + formula: Combine
+          # creates the function once and every listed channel shares it
+          for iy in $GBINS; do
+            RP="${RP}
+qcd_abcd_${F}_${C}${GS} rateParam ${F}_${C}_${B}_y${iy} qcd (@0*@1/@2) ${FARGS}"
+          done
+        fi
+       done
       done
     done
   fi
@@ -635,7 +732,7 @@ lepsf group = ${SFALL}"
     [ -n "$QFK" ] && SYST="${SYST}
 qcdff group = ${QFK}"
     LHEDESC="shape systematics -- theory (group lhe): ${THK:-none}; lepton SFs (group lepsf): ${SFALL:-none}; <proc>_<syst>Up/Down from the input files' sidecars, entries only on the columns of the inputs listing them"
-    [ -n "$QFK" ] && LHEDESC="${LHEDESC}; fake-factor QCD slopes (group qcdff): ${QFK} on the SR qcd_abcd of their charge"
+    [ -n "$QFK" ] && LHEDESC="${LHEDESC}; fake-factor QCD slopes (group qcdff): ${QFK} on the SR ${QPATH} of their charge"
     [ -n "$SFEDIT" ] && LHEDESC="${LHEDESC}; muTrig decorrelated per rapidity bin via nuisance edit rename (SF_TRIG_CORR=perbin)"
   fi
   # the kappas / CR count of the flavours in the card (grand card: the
@@ -648,6 +745,9 @@ qcdff group = ${QFK}"
     QDESC="qcd_norm free rateParam per W channel"
   elif [ "$QCD_MODE" = "abcd" ]; then
     QDESC="QCD in-fit ABCD: ${NCR} CR channels + (sB*sC/sD) formula rateParam on the SR qcd_abcd; residual lnN ${KDA}; CRB W-part ${QCD_WCR}"
+  elif [ "$QCD_MODE" = "abcdy" ]; then
+    NGRP=$(ygrp_names "$B" | wc -l | tr -d ' ')
+    QDESC="QCD in-fit ABCD PER RAPIDITY GROUP (abcdy; $(ygrp_names "$B" | tr '\n' ' ' | sed 's/ $//')): $((NCR * NGRP)) CR channels + one (sB*sC/sD) formula per (flavour, charge, group) on the SR qcd_abcdy; residual lnN ${KDA} shared by the groups; CRB W-part ${QCD_WCR}"
   else
     QDESC="QCD lnN (ABCD) per flavour x charge: ${KDL}"
   fi
@@ -710,6 +810,14 @@ EOF
       done
     done
   fi
+  if [ "$QCD_MODE" = "abcdy" ] && [ "$QCD_WCR" != "frozen" ]; then
+    # abcdy: the same maps on the GROUP CRB channel that holds w_y<i>
+    for C in Wp Wm; do
+      for iy in $YBINS; do
+        echo "map=${FLAVRE}_${C}_$(ygrp_of "$B" "$iy")_CRB/w_y${iy}\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      done
+    done
+  fi
   echo "map=.*/(z|ztau|zsig)\$:r_Z[1,0,10]" >> "$MAPS"
 
   echo "[make_pO_simfit_cards] wrote $(basename "$CARD") (${NCH} channels) + $(basename "$MAPS") ($(wc -l < "$MAPS" | tr -d ' ') maps)"
@@ -766,7 +874,14 @@ write_sigma_maps() {
     echo "                              (run skim/gen_xsec.C, then sync_lxplus.sh upload)"
     return 1
   fi
-  awk -v B="$B" -v QMODE="$QCD_MODE" -v QWCR="$QCD_WCR" -v FRE="$FLAVRE" '
+  # abcdy (2026-10-19): "<bin>:<group> ..." of this binning, so the CRB pattern
+  # names the group channel holding w_y<bin>; empty in every other mode
+  local GM="" iyg
+  if [ "$QCD_MODE" = "abcdy" ]; then
+    for iyg in $YBINS; do GM="$GM $iyg:$(ygrp_of "$B" "$iyg")"; done
+  fi
+  awk -v B="$B" -v QMODE="$QCD_MODE" -v QWCR="$QCD_WCR" -v FRE="$FLAVRE" -v GM="$GM" '
+    BEGIN { ng = split(GM, gma, " "); for (k = 1; k <= ng; k++) { split(gma[k], kv, ":"); grp[kv[1]] = kv[2] } }
     /^#/ { next }
     $1 == B { key = $2 "_y" $3; g[key] = $4 + 0; order[++n] = key; tot += $4 }
     END {
@@ -793,6 +908,8 @@ write_sigma_maps() {
         pat = sprintf("%s_%s_%s_y%s/(signal|wtau)$", FRE, C, B, iy)
         if (QMODE == "abcd" && QWCR != "frozen")
           pat = pat sprintf(",%s_%s_CRB/w_y%s$", FRE, C, iy)
+        else if (QMODE == "abcdy" && QWCR != "frozen")
+          pat = pat sprintf(",%s_%s_%s_CRB/w_y%s$", FRE, C, grp[iy], iy)
         if (key == anchor)
           printf "map=%s:r_%s=expr;;r_%s(\"@0/@1\",sigmaW,Wnorm)\n", pat, key, key
         else
@@ -817,7 +934,7 @@ gen_simfit_card fb
 # entries hold the REDUCED kappas.
 KQM="$QCD_LNN_MU"; KQE="$QCD_LNN_ELE"
 if [ "$QCD_MODE" = "free" ]; then KQM=0; KQE=0; fi
-if [ "$QCD_MODE" = "abcd" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
+if [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
 # lheSysts (2026-09-07): ALL shape nuisances in the cards, comma-joined, by
 # their POST-EDIT names (theory + lepton SFs incl. the per-bin muTrig_y<i> +
 # since 2026-09-29 the qcdFF_* fake-factor slopes; "none" when off/absent)
@@ -840,6 +957,20 @@ lheSysts $LHELIST
 sfTrigCorr $SF_TRIG_CORR
 flavours $(echo "$FLAVS" | tr ' ' ',')
 EOF
+# qcdGroups (abcdy only, 2026-10-19): the rapidity groups THESE cards were built
+# with, ONE token (postfit_incl.C reads the file as key/value pairs):
+#   lab:fwd=10,11/bwd=0,1/cen=2,...,9;fb:fwd=...
+# run_pO_fits.sh passes it to the extractor (per-group scales + multipliers).
+# Absent in every other mode, so the abcd/lnN/free sidecars are unchanged.
+if [ "$QCD_MODE" = "abcdy" ]; then
+  QGTOK=""
+  for Bq in lab fb; do
+    part=""
+    for g in $(ygrp_names "$Bq"); do part="${part:+$part/}$g=$(ygrp_bins "$Bq" "$g" | tr ' ' ',')"; done
+    QGTOK="${QGTOK:+$QGTOK;}$Bq:$part"
+  done
+  echo "qcdGroups $QGTOK" >> "$OUTDIR/qcd_lnn_kappas.txt"
+fi
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (flavours: ${FLAVS}; W discriminant: ${DISCLABEL})"
 KMSG=""

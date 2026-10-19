@@ -75,6 +75,8 @@ cmsenv
 QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
 LHE_SYST=off ./run_pO_fits.sh both simfit --disc leppt_mt40             # no theory shape nuisances
 SF_TRIG_CORR=perbin QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40   # robustness: muTrig decorrelated per y bin
+QCD_MODE=abcdy ./run_pO_fits.sh both all --asimov                       # OPT-IN: in-fit ABCD per rapidity group -> pO_fit_out_leppt_mt40_abcdy/
+QCD_MODE=abcdy ./run_pO_impacts.sh --fit all                            # (its impacts, same tree)
 
 # W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default leppt_mt40 since 2026-08-16).
 # leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
@@ -161,7 +163,13 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
   ABCD prediction; **free** — `qcd_norm_<channel>` per W channel (48);
   **abcd** (leppt_mt40 only) — in-fit ABCD: CR channels `<F>_<C>_CR{B,C,D}`,
   free scales `qcd_s{B,C,D}_<F>_<C>`, formula rateParam `(@0*@1/@2)` on the SR
-  `qcd_abcd` template, reduced residual lnN. `w`/`wtau` under the Z peaks:
+  `qcd_abcd` template, reduced residual lnN; **abcdy** (2026-10-19, OPT-IN,
+  leppt_mt40 only) — the same per rapidity GROUP from the inputs' group
+  sidecar `combine_input_W_leppt_mt40_abcdy.txt` (fwd y10-11 | bwd y0-1 |
+  cen y2-9): CR channels `<F>_<C>_<g>_CR{B,C,D}`, scales
+  `qcd_s{B,C,D}_<F>_<C>_<g>`, one formula `qcd_abcd_<F>_<C>_<g>` per group on
+  the SR `qcd_abcdy` template, the residual lnN shared by the groups; own
+  out-tree `pO_fit_out_leppt_mt40_abcdy/`. `w`/`wtau` under the Z peaks:
   frozen at absolute MC (0.03–0.06 events — negligible by measurement).
 - ttbar (2026-10-16): its own column `ttbar` (process id 20) in every W
   channel, both Z peaks and CRB (inside the frozen `ewk` in CRC/CRD); no map

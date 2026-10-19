@@ -23,6 +23,16 @@
 //     total B0*C40/D0). kQcdMu/kQcdEle then hold the REDUCED kappas.
 //     An empty/absent qcdMode falls back to the kappa-based inference
 //     (legacy sidecars): kQcd > 1 -> lnN, = 0 -> free.
+//   qcdMode = "abcdy" (2026-10-19, OPT-IN): the in-fit ABCD PER RAPIDITY GROUP.
+//     The trailing `qcdGroups` argument (the cards' sidecar qcdGroups line,
+//     passed by run_pO_fits.sh: "lab:fwd=10,11/bwd=0,1/cen=2,...;fb:...")
+//     names the groups; each has its own scales qcd_s{B,C,D}_<F>_<C>_<g> and
+//     formula qcd_abcd_<F>_<C>_<g>, so AbcdScale evaluates the multiplier per
+//     group (the residual kappa^theta is shared by the groups of a flavour x
+//     charge), the CSV qcd columns of a bin carry ITS group's multiplier (on
+//     the qcd_abcdy template), qcd_model = "abcdy", the summary gets the group
+//     scales + qcd_abcd_mult_<F>_<C>_<g>, and the Asimov closure covers every
+//     group scale. Default arguments: behaviour unchanged.
 //   kLumi > 1 -> the global 'lumi' lnN exists; its multiplier (+err) is appended
 //     as two extra CSV columns (lumi,lumiErr; 1,0 when off) -- postfit_incl.C
 //     uses it to keep the "prefit x fitted scale" reconstruction exact.
@@ -158,12 +168,16 @@ Par LnNScale(const RooFitResult *fr, double kappa, const TString &name) {
 // reported with the other shape nuisances (<name>_theta rows), and
 // postfit_incl.C reads the postfit shapes from fitDiagnostics whenever shape
 // nuisances are present, so nothing downstream relies on M alone.
-Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char *chg) {
+// abcdy (2026-10-19): grp = the rapidity group -> the scales of that group,
+// qcd_s{B,C,D}_<F>_<C>_<grp>; the residual nuisance qcd_rate_<F>_<C> is shared
+// by the groups. grp = "" (default) = the inclusive abcd names, unchanged.
+Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char *chg, const char *grp = "") {
   Par p; p.ok = false; p.v = 1.0; p.e = 0.0;
   if (!fr) return p;
-  const TString nB = TString::Format("qcd_sB_%s_%s", flav, chg);
-  const TString nC = TString::Format("qcd_sC_%s_%s", flav, chg);
-  const TString nD = TString::Format("qcd_sD_%s_%s", flav, chg);
+  const TString gs = (grp && grp[0]) ? TString("_") + grp : TString("");
+  const TString nB = TString::Format("qcd_sB_%s_%s%s", flav, chg, gs.Data());
+  const TString nC = TString::Format("qcd_sC_%s_%s%s", flav, chg, gs.Data());
+  const TString nD = TString::Format("qcd_sD_%s_%s%s", flav, chg, gs.Data());
   const Par sB = GetPar(fr, nB), sC = GetPar(fr, nC), sD = GetPar(fr, nD);
   if (!sB.ok || !sC.ok || !sD.ok || sB.v <= 0.0 || sC.v <= 0.0 || sD.v <= 0.0)
     return p;
@@ -291,7 +305,9 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                                                   //  nuisances in the cards ("" = none)
                        const char *flavours = "mu,ele", // lepton flavours IN the fit
                                                         //  (2026-09-22: "mu" | "ele" = flavfit)
-                       const char *outTag = "comb")     // output-file prefix: comb | simfit_mu | simfit_ele
+                       const char *outTag = "comb",     // output-file prefix: comb | simfit_mu | simfit_ele
+                       const char *qcdGroups = "")      // abcdy only (2026-10-19): the sidecar qcdGroups
+                                                        //  token, "lab:fwd=10,11/bwd=0,1/...;fb:..."
 {
   gSystem->mkdir(outDir, kTRUE);
 
@@ -318,6 +334,46 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
             << (useFl[0] ? "mu " : "") << (useFl[1] ? "ele" : "") << "\n";
 
   const bool isAbcd = (TString(qcdMode) == "abcd");
+  // abcdy (2026-10-19): the rapidity groups per binning [0 = lab, 1 = fb]:
+  // the group names in sidecar order + the group of every y bin
+  const bool isAbcdY = (TString(qcdMode) == "abcdy");
+  std::vector<TString> grpNames[2];
+  TString grpOf[2][12];
+  if (isAbcdY) {
+    TString s(qcdGroups);
+    TObjArray *parts = s.Tokenize(";");
+    for (int ip = 0; ip < parts->GetEntries(); ++ip) {
+      const TString part = ((TObjString *)parts->At(ip))->GetString();
+      const Ssiz_t colon = part.Index(":");
+      if (colon < 0) continue;
+      const TString bn = part(0, colon);
+      const int ibn = (bn == "lab") ? 0 : (bn == "fb") ? 1 : -1;
+      if (ibn < 0) continue;
+      // NB TString::operator()(start, LENGTH); copy to a TString before use
+      TObjArray *grs = TString(part(colon + 1, part.Length() - colon - 1)).Tokenize("/");
+      for (int ig = 0; ig < grs->GetEntries(); ++ig) {
+        const TString gdef = ((TObjString *)grs->At(ig))->GetString();
+        const Ssiz_t eq = gdef.Index("=");
+        if (eq < 0) continue;
+        const TString gname = gdef(0, eq);
+        grpNames[ibn].push_back(gname);
+        TObjArray *ys = TString(gdef(eq + 1, gdef.Length() - eq - 1)).Tokenize(",");
+        for (int k = 0; k < ys->GetEntries(); ++k) {
+          const int iy = ((TObjString *)ys->At(k))->GetString().Atoi();
+          if (iy >= 0 && iy < 12) grpOf[ibn][iy] = gname;
+        }
+        delete ys;
+      }
+      delete grs;
+    }
+    delete parts;
+    bool okG = true;
+    for (int ib = 0; ib < 2; ++ib)
+      for (int iy = 0; iy < 12; ++iy) okG &= (grpOf[ib][iy] != "");
+    std::cout << "[extract-simfit] QCD_MODE=abcdy: rapidity groups '" << qcdGroups << "'"
+              << (okG ? "" : "  WARN incomplete (every bin of lab and fb needs a group) -- the per-bin qcd"
+                             " multipliers of the unassigned bins will read 0") << "\n";
+  }
   std::vector<TString> lheNames; // the LHE shape nuisances (sidecar lheSysts line)
   {
     TString s(lheSysts);
@@ -332,7 +388,8 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     }
   }
   // the qcd_model tag stamped on every CSV row (readers pick qcd vs qcd_abcd)
-  const char *qModel = isAbcd ? "abcd" : ((kQcdMu > 1.0 || kQcdEle > 1.0) ? "lnN" : "free");
+  const char *qModel = isAbcdY ? "abcdy"
+                     : isAbcd ? "abcd" : ((kQcdMu > 1.0 || kQcdEle > 1.0) ? "lnN" : "free");
 
   // the W input files of the flavours IN the fit (a flavour not in it is never
   // opened -- run_pO_fits.sh passes "none" for it)
@@ -515,17 +572,24 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
     // prefit EWK-subtracted counts; the SR multiplier sB*sC/sD (x kappa^theta)
     // is what the CSV qcd columns carry. Postfit QCD yield = multiplier x
     // Sum_y Int(qcd_abcd) = multiplier x B0*C40/D0.
-    if (isAbcd) {
+    // abcdy (2026-10-19): the same per rapidity GROUP of this binning -- the
+    // group's scales qcd_s*_<F>_<C>_<g> and multiplier qcd_abcd_mult_<F>_<C>_<g>
+    if (isAbcd || isAbcdY) {
+      std::vector<TString> grps;
+      if (isAbcdY) grps = grpNames[ib];
+      else grps.push_back("");
       for (int ifl = 0; ifl < 2; ++ifl) {
         if (!useFl[ifl]) continue; // flavour not in this fit
         const char *flav = (ifl == 0) ? "mu" : "ele";
         const double kap = (ifl == 0) ? kQcdMu : kQcdEle;
         for (int ic2 = 0; ic2 < 2; ++ic2) {
+         for (const TString &gname : grps) {
+          const TString gs = (gname != "") ? TString("_") + gname : TString("");
           const char *scl[3] = {"B", "C", "D"};
           double sv[3] = {0.0, 0.0, 0.0};
           bool allok = true;
           for (int is2 = 0; is2 < 3; ++is2) {
-            const TString nn = TString::Format("qcd_s%s_%s_%s", scl[is2], flav, charges[ic2]);
+            const TString nn = TString::Format("qcd_s%s_%s_%s%s", scl[is2], flav, charges[ic2], gs.Data());
             Par s = GetPar(fr, nn);
             if (!s.ok) {
               std::cerr << "[extract-simfit] WARN CR scale " << nn << " not in fit_s\n";
@@ -535,15 +599,16 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
             sv[is2] = s.v;
             scsv << fitName << "," << nn << "," << s.v << "," << s.e << ",,,\n";
           }
-          Par m = AbcdScale(fr, kap, flav, charges[ic2]);
+          Par m = AbcdScale(fr, kap, flav, charges[ic2], gname.Data());
           if (allok && m.ok) {
             std::cout << "[extract-simfit] " << fitName << ": qcd ABCD " << flav << "_"
-                      << charges[ic2] << ": sB=" << Form("%.3f", sv[0])
+                      << charges[ic2] << gs << ": sB=" << Form("%.3f", sv[0])
                       << " sC=" << Form("%.3f", sv[1]) << " sD=" << Form("%.3f", sv[2])
                       << " -> SR multiplier = " << Form("%.4f +/- %.4f", m.v, m.e) << "\n";
-            scsv << fitName << ",qcd_abcd_mult_" << flav << "_" << charges[ic2] << ","
+            scsv << fitName << ",qcd_abcd_mult_" << flav << "_" << charges[ic2] << gs << ","
                  << m.v << "," << m.e << ",,,\n";
           }
+         }
         }
       }
     }
@@ -657,14 +722,19 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         // formula (sB*sC/sD) x kappa^theta (on the qcd_abcd template); lnN mode
         // -> kappa^theta of the shared (flavour, charge) nuisance; legacy free
         // mode -> the per-channel rateParam
-        Par qmu = isAbcd ? AbcdScale(fr, kQcdMu, "mu", charges[ic])
+        // abcdy (2026-10-19): the multiplier of THIS bin's rapidity group (on
+        // the qcd_abcdy template); a bin without a group reads 0 (warned above)
+        Par qmu = isAbcdY ? AbcdScale(fr, kQcdMu, "mu", charges[ic], grpOf[ib][iy].Data())
+                  : isAbcd ? AbcdScale(fr, kQcdMu, "mu", charges[ic])
                   : (kQcdMu > 1.0)
                       ? LnNScale(fr, kQcdMu, TString::Format("qcd_rate_mu_%s", charges[ic]))
                       : GetPar(fr, TString::Format("qcd_norm_mu_%s", regs[k].Data()));
-        Par qel = isAbcd ? AbcdScale(fr, kQcdEle, "ele", charges[ic])
+        Par qel = isAbcdY ? AbcdScale(fr, kQcdEle, "ele", charges[ic], grpOf[ib][iy].Data())
+                  : isAbcd ? AbcdScale(fr, kQcdEle, "ele", charges[ic])
                   : (kQcdEle > 1.0)
                       ? LnNScale(fr, kQcdEle, TString::Format("qcd_rate_ele_%s", charges[ic]))
                       : GetPar(fr, TString::Format("qcd_norm_ele_%s", regs[k].Data()));
+        if (isAbcdY && grpOf[ib][iy] == "") { qmu.v = qmu.e = qel.v = qel.e = 0.0; }
         // a flavour not in this fit has no QCD parameter: 0,0 = "not in this fit"
         // (the helpers would return a plausible-looking 1 for an absent one)
         if (!useFl[0]) { qmu.v = 0.0; qmu.e = 0.0; }
@@ -911,6 +981,22 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
             scsv << fitName << "_asimov," << nn << "," << s.v << "," << s.e << ",,,\n";
             if (std::fabs(s.v - 1.0) > worst) { worst = std::fabs(s.v - 1.0); worstName = nn; }
           }
+      // abcdy (2026-10-19): every group's three scales must come back at 1 too
+      // (a missing one is reported -- in abcdy cards they all exist)
+      if (isAbcdY)
+        for (int ifl = 0; ifl < 2; ++ifl) {
+          if (!useFl[ifl]) continue;
+          for (int ic2 = 0; ic2 < 2; ++ic2)
+            for (const TString &gname : grpNames[ib])
+              for (int is2 = 0; is2 < 3; ++is2) {
+                const TString nn = TString::Format("qcd_s%s_%s_%s_%s", sclN[is2], (ifl == 0) ? "mu" : "ele",
+                                                   charges[ic2], gname.Data());
+                Par s = GetPar(fra, nn);
+                if (!s.ok) { std::cerr << "[asimov] WARN group scale " << nn << " not in the Asimov fit_s\n"; continue; }
+                scsv << fitName << "_asimov," << nn << "," << s.v << "," << s.e << ",,,\n";
+                if (std::fabs(s.v - 1.0) > worst) { worst = std::fabs(s.v - 1.0); worstName = nn; }
+              }
+        }
       const bool pass = (worst >= 0.0 && worst < 0.01);
       std::cout << "[asimov] " << fitName << " closure: max |POI-1| = " << Form("%.4f", worst)
                 << " (" << worstName << ") => " << (pass ? "PASS" : "FAIL (tolerance 0.01)") << "\n";

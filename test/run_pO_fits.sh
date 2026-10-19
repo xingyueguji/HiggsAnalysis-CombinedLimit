@@ -62,7 +62,13 @@
 #   (sB*sC/sD) on the SR qcd_abcd template, so the QCD normalization floats
 #   with the CR data and the EWK subtraction rides the POIs; env
 #   QCD_ABCD_LNN_MU/QCD_ABCD_LNN_ELE = the reduced residual kappas,
-#   QCD_WCR=float|frozen picks the CRB W treatment); w/wtau under the Z
+#   QCD_WCR=float|frozen picks the CRB W treatment).  QCD_MODE=abcdy
+#   (2026-10-19, OPT-IN, leppt_mt40 ONLY) = the in-fit ABCD PER RAPIDITY GROUP
+#   (fwd y10-11 | bwd y0-1 | cen y2-9, from the inputs' group sidecar
+#   combine_input_W_leppt_mt40_abcdy.txt): each group has its own CRs, scales
+#   and formula on the SR qcd_abcdy template; the out-tree defaults to
+#   pO_fit_out_leppt_mt40_abcdy/ so the nominal abcd fit is never
+#   overwritten (an explicit --out wins); w/wtau under the Z
 #   peaks frozen at absolute MC.  LHE shape systematics (2026-09-07):
 #   nPDF / qcdScale / alphaS `shape` rows from the <proc>_<syst>Up/Down
 #   templates the inputs carry (env LHE_SYST=auto|off|list -> the card
@@ -174,6 +180,13 @@ YT="Events / 2.0 GeV"   # MET and lepton-pT templates are both 2 GeV bins
 WINNAME="combine_input_W${DSUF}.root"
 # unsuffixed out-tree for met (its historical name); suffixed tree for the variants (unless --out given)
 if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
+# QCD_MODE=abcdy (2026-10-19, the rapidity-resolved in-fit ABCD) gets its OWN
+# default out-tree, so it can never overwrite the nominal (abcd) fit of the
+# same discriminant; an explicit --out still wins
+if [ "$OUT_SET" -eq 0 ] && [ "${QCD_MODE:-}" = "abcdy" ]; then
+  OUTROOT="${OUTROOT}_abcdy"
+  echo "[run_pO_fits] QCD_MODE=abcdy -> out-tree $OUTROOT"
+fi
 
 # ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
 # ---- the combine_input_*.root copies already in the work dir; for ----------
@@ -379,7 +392,7 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
   # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
   # -> none); the extractor reports their pulls + closure.
   # Also called by --extract-only (2026-09-15) on an existing fits/ tree.
-  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; KF="$SDCD/qcd_lnn_kappas.txt"
+  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; QGRP=""; KF="$SDCD/qcd_lnn_kappas.txt"
   if [ -f "$KF" ]; then
     KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
     KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
@@ -387,6 +400,9 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     QMODE=$(awk '$1=="qcdMode"{print $2}' "$KF"); QMODE="${QMODE:-}"
     LHES=$(awk '$1=="lheSysts"{print $2}' "$KF"); LHES="${LHES:-}"
     [ "$LHES" = "none" ] && LHES=""
+    # qcdGroups (abcdy only, 2026-10-19): the rapidity groups of the cards ->
+    # the extractor's per-group scales / multipliers; "" in every other mode
+    QGRP=$(awk '$1=="qcdGroups"{print $2}' "$KF"); QGRP="${QGRP:-}"
     # flavours (2026-09-22): the cards must be the ones of THIS tree (a sidecar
     # without the line predates per-flavour fits = the grand mu,ele card)
     KFL=$(awk '$1=="flavours"{print $2}' "$KF"); KFL="${KFL:-mu,ele}"
@@ -406,7 +422,7 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     # produces numbers anyone quotes, it gets a log.)
     # (log named after the work dir: extract_simfit.log for the grand fit, as
     #  before; extract_simfit_<flav>.log for the per-flavour ones)
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\")" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\",\"$QGRP\")" 2>&1 \
       | tee "$SSUMM/extract_${SNAME}.log" \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
     echo "[extract] full log: $SSUMM/extract_${SNAME}.log"
@@ -563,11 +579,16 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
   # (absent -> no shape rows; a stale copy is removed so it cannot lie).
   # (only the flavours in the fit: a per-flavour work dir holds one flavour's
   #  inputs, so nothing of the other can leak into its cards)
+  # + the abcdy GROUP sidecar (2026-10-19, <W input minus .root>_abcdy.txt, W
+  # inputs only): the card generator needs it for QCD_MODE=abcdy and refuses
+  # that mode without it; same copy-or-remove rule
   for pair in "$WMU_SRC|$AWMU" "$ZMU_SRC|$AZMU" "$WEL_SRC|$AWEL" "$ZEL_SRC|$AZEL"; do
     psrc="${pair%%|*}"; pdst="${pair##*|}"
     [ "$pdst" = none ] && continue
     if [ -f "${psrc%.root}_systs.txt" ]; then cp -f "${psrc%.root}_systs.txt" "${pdst%.root}_systs.txt"
     else rm -f "${pdst%.root}_systs.txt"; fi
+    if [ -f "${psrc%.root}_abcdy.txt" ]; then cp -f "${psrc%.root}_abcdy.txt" "${pdst%.root}_abcdy.txt"
+    else rm -f "${pdst%.root}_abcdy.txt"; fi
     cp -f "$psrc" "$pdst"
   done
 

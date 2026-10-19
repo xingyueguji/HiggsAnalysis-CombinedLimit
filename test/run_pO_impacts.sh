@@ -34,6 +34,8 @@
 # --fit all = comb + mu + ele in one go (= the fit driver's mode all); a list
 # ("mu,ele") picks several. A fit whose work dir does not exist (e.g. flavfit
 # never ran) is skipped with a note, so `all` also works on a grand-fit-only tree.
+# QCD_MODE=abcdy in the env (2026-10-19) -> the tree pO_fit_out<suffix>_abcdy/,
+# where run_pO_fits.sh puts that mode's fits.
 # Outputs:  pO_fit_out<suffix>/<fit dir>/impacts/   (json + per-POI PDFs)
 #           pO_fit_out<suffix>/<fit dir>/cov/       (correlation-matrix png+pdf)
 # Both directories are pulled back to the Mac by  ./sync_lxplus.sh download.
@@ -72,6 +74,10 @@ case "$DISC" in
   leppt_mt40) SFX="_leppt_mt40";;
   *) echo "[ERROR] unknown --disc '$DISC' (met|leppt|leppt_mt40)"; exit 1;;
 esac
+# QCD_MODE=abcdy (2026-10-19): that fit lives in its own tree
+# pO_fit_out<suffix>_abcdy/ (run_pO_fits.sh's default for the mode) -- so the
+# same env var that built it points the impacts at it
+if [ "${QCD_MODE:-}" = "abcdy" ]; then SFX="${SFX}_abcdy"; echo "[run_pO_impacts] QCD_MODE=abcdy -> pO_fit_out${SFX}/"; fi
 # the fit(s): all = the grand fit + both per-flavour fits; a comma- or
 # space-separated list picks several (validated up front, before any work)
 case "$FIT" in
