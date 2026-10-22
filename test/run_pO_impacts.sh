@@ -24,7 +24,7 @@
 #      propagation actually uses)
 #
 # Usage (impacts need cmsenv; --cov-only needs only root):
-#   ./run_pO_impacts.sh [--disc met|leppt|leppt_mt40] [--variant lab|fb|both]
+#   ./run_pO_impacts.sh [--disc met|leppt|leppt_mt40|met_mt40] [--variant lab|fb|both]
 #                       [--fit comb|mu|ele|all]       (default: comb = the grand fit)
 #                       [--pois "r_Wp_y3 r_Z ..."]    (default: ALL 25 POIs)
 #                       [--impacts-only | --cov-only] [--dry-run]
@@ -46,7 +46,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-DISC="leppt_mt40"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0; FIT="comb"
+DISC="leppt"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0; FIT="comb"   # leppt = the nominal since 2026-10-21
 while [ $# -gt 0 ]; do
   case "$1" in
     --disc)    shift; DISC="${1:-}";;
@@ -72,7 +72,8 @@ case "$DISC" in
   met)        SFX="";;
   leppt)      SFX="_leppt";;
   leppt_mt40) SFX="_leppt_mt40";;
-  *) echo "[ERROR] unknown --disc '$DISC' (met|leppt|leppt_mt40)"; exit 1;;
+  met_mt40)   SFX="_met_mt40";;   # 2026-10-20: PF MET of the leppt_mt40 events
+  *) echo "[ERROR] unknown --disc '$DISC' (met|leppt|leppt_mt40|met_mt40)"; exit 1;;
 esac
 # QCD_MODE=abcdy (2026-10-19): that fit lives in its own tree
 # pO_fit_out<suffix>_abcdy/ (run_pO_fits.sh's default for the mode) -- so the

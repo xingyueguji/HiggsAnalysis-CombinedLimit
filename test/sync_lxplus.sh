@@ -32,7 +32,7 @@
 #   ./sync_lxplus.sh download --postfit   # also pull the postfit plots (skipped if absent)
 #   ./sync_lxplus.sh upload-idiso     # the ELECTRON ID+ISO SF study (2026-09-25), a
 #                                     # SEPARATE stream: its inputs (the analysis
-#                                     # repo's correction/rootfile/idiso_sf_ele/)
+#                                     # repo's correction/electron_sf_check/idiso_sf/rootfile/)
 #                                     # + run_pO_idiso_sf.sh and its two scripts.
 #                                     # upload / download never touch it.
 #   ./sync_lxplus.sh download-idiso   # pull test/pO_idiso_sf_out/ (summary CSVs +
@@ -110,11 +110,13 @@ upload_inputs() {
     echo "[ERROR] missing input(s) -- run Steps 1-3 (skim, run_ngen, qcd_abcd, mtandmet/dileptonpeak) first."
     err=1; return
   fi
-  # optional: the lepton-pT discriminant variants (2026-07-30). Uploaded when
-  # present; a missing variant is only a note, not an error.
+  # optional: the lepton-pT discriminant variants (2026-07-30) and the MET
+  # counterpart of leppt_mt40 (met_mt40, 2026-10-20). Uploaded when present; a
+  # missing variant is only a note, not an error.
   SEND="plots/combine_input_W.root plots/combine_input_Z.root plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root"
-  for f in plots/combine_input_W_leppt.root plots/combine_input_W_leppt_mt40.root \
-           plots/Elec/combine_input_W_leppt.root plots/Elec/combine_input_W_leppt_mt40.root; do
+  for f in plots/combine_input_W_leppt.root plots/combine_input_W_leppt_mt40.root plots/combine_input_W_met_mt40.root \
+           plots/Elec/combine_input_W_leppt.root plots/Elec/combine_input_W_leppt_mt40.root \
+           plots/Elec/combine_input_W_met_mt40.root; do
     if [ -f "$ANA_LOCAL/plotting/$f" ]; then SEND="$SEND $f"
     else echo "[note] optional variant not built (skipped): $f"; fi
   done
@@ -128,6 +130,10 @@ upload_inputs() {
     sc="${f%.root}_systs.txt"
     [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
     sc="${f%.root}_abcdy.txt"
+    [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
+    # + the mtsplit group sidecar of the no-m_T input (2026-10-21, groups + kappaWin/kappaXfer;
+    # QCD_MODE=mtsplit refuses to build cards without it)
+    sc="${f%.root}_mtsplit.txt"
     [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
   done
   rmkdir "$ANA_LX/plotting"
@@ -170,10 +176,10 @@ upload_scripts() {
 }
 
 download_results() {
-  # one out-tree per discriminant: "" (PF MET), _leppt, _leppt_mt40
-  # + _leppt_mt40_abcdy (2026-10-19): the QCD_MODE=abcdy fit's own tree
+  # one out-tree per discriminant: "" (PF MET), _leppt, _leppt_mt40, _met_mt40
+  # (2026-10-20) + the QCD_MODE=abcdy fits' own trees (2026-10-19)
   local got=0
-  for sfx in "" "_leppt" "_leppt_mt40" "_leppt_mt40_abcdy"; do
+  for sfx in "" "_leppt" "_leppt_mt40" "_leppt_mt40_abcdy" "_met_mt40" "_met_mt40_abcdy"; do
     local tree="pO_fit_out${sfx}"
     echo "== download fit results <- $LX:$FORK_LX/test/$tree/ =="
     # (the legacy per-channel trees <tree>/{mu,ele}/ are no longer pulled: that
@@ -265,16 +271,20 @@ download_results() {
 # its own inputs, scripts and out-tree (test/pO_idiso_sf_out/); nothing above
 # reads or writes any of it, and these two functions touch nothing else.
 upload_idiso() {
-  local d="$ANA_LOCAL/correction/rootfile/idiso_sf_ele"
-  echo "== upload the ID+iso SF inputs -> $LX:$ANA_LX/correction/rootfile/idiso_sf_ele/ =="
+  # since 2026-10-20 under correction/electron_sf_check/idiso_sf/rootfile (was
+  # correction/rootfile/idiso_sf_ele) -- the same relative path on lxplus, which
+  # run_pO_idiso_sf.sh's INDIR_DEFAULTS reads
+  local rel="correction/electron_sf_check/idiso_sf/rootfile"
+  local d="$ANA_LOCAL/$rel"
+  echo "== upload the ID+iso SF inputs -> $LX:$ANA_LX/$rel/ =="
   if ! ls "$d"/combine_input_idiso_*.root >/dev/null 2>&1; then
     echo "[ERROR] no $d/combine_input_idiso_*.root -- run correction/run_idiso_sf.sh (skim + inputs) first."
     err=1; return
   fi
-  rmkdir "$ANA_LX/correction/rootfile/idiso_sf_ele"
+  rmkdir "$ANA_LX/$rel"
   # the inputs travel with their _meta.txt sidecars (the card generator reads nbins there)
   ( cd "$d" && run combine_input_idiso_*.root combine_input_idiso_*_meta.txt \
-                   "$LX:$ANA_LX/correction/rootfile/idiso_sf_ele/" ) || err=1
+                   "$LX:$ANA_LX/$rel/" ) || err=1
   echo "== upload the ID+iso SF scripts -> $LX:$FORK_LX/test/ =="
   rmkdir "$FORK_LX/test/my_script"
   run "$FORK_LOCAL/test/run_pO_idiso_sf.sh" "$LX:$FORK_LX/test/" || err=1
@@ -324,27 +334,31 @@ case "$CMD" in
     echo "[sync_lxplus] upload done. Next, on lxplus:"
     echo "    ssh $LX"
     echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
-    echo "    # DEFAULT: simfit (mu+e in one likelihood), --disc leppt_mt40,"
-    echo "    # QCD_MODE=abcd, and THREE fits per binning variant --"
-    echo "    # nominal + --statonly (the stat error) + --contour (sigma_W as a POI):"
+    echo "    # DEFAULT (since 2026-10-21): simfit (mu+e in one likelihood), --disc leppt = the"
+    echo "    # no-m_T lepton-pT fit (QCD_MODE=mtsplit) -> pO_fit_out_leppt/, and THREE fits per"
+    echo "    # binning variant -- nominal + --statonly (the stat error) + --contour (sigma_W as a POI):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
     echo "    # the mu-only and e-only fits (flavfit: the same model, one flavour each):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both flavfit --asimov"
     echo "    # or ALL THREE (grand + mu-only + e-only) in one go:"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
+    echo "    # the m_T > 40 lepton-pT fit (kept for later; QCD_MODE=abcd):"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov --disc leppt_mt40"
     echo "    # backup discriminant, PF MET (defaults to QCD_MODE=lnN):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc met"
     echo "    # OPT-IN rapidity-resolved in-fit ABCD (fwd/bwd/cen groups) -> its own tree pO_fit_out_leppt_mt40_abcdy/:"
     echo "    QCD_MODE=abcdy PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
+    echo "    # the MET counterpart of leppt_mt40 (same events, PF MET; 2026-10-20) -> pO_fit_out_met_mt40[_abcdy]/:"
+    echo "    QCD_MODE=abcdy PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov --disc met_mt40"
     echo "    # then impacts + covariance plots (pulled by 'download'; --fit mu|ele for flavfit):"
-    echo "    ./run_pO_impacts.sh --disc leppt_mt40" ;;
+    echo "    ./run_pO_impacts.sh --disc leppt --fit all" ;;
   download)
     echo "[sync_lxplus] download done. Next, locally -- ONE command runs the whole"
     echo "observables chain (charge asymmetry, F/B, sigma = r x sigma_gen, and the"
     echo "(sigma_W, sigma_Z) contour; + the mu-vs-e overlays when the flavfit trees"
     echo "exist) for that discriminant:"
     echo "    cd $ANA_LOCAL/analysis"
-    echo "    ./run_observables.sh leppt_mt40      # or: met | all"
+    echo "    ./run_observables.sh leppt           # the nominal; or: leppt_mt40 | met | all"
     echo "Check in its output that the contour came from the scan, not the ellipse:"
     echo "    [profiled] using .../higgsCombine_contour_lab.MultiDimFit.mH*.root"
     echo "    [profiled] scan min vs covariance best fit: d(sigma_W) = +0.0000 nb" ;;

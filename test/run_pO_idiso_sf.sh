@@ -49,7 +49,8 @@
 #           measures how the result depends on the choice of sideband
 #   --inputs  dir holding combine_input_idiso_*.root; default: env IDISO_INPUTS,
 #             else the first existing of the analysis repo's
-#             correction/rootfile/idiso_sf_ele (local, lxplus)
+#             correction/electron_sf_check/idiso_sf/rootfile (local, lxplus;
+#             correction/rootfile/idiso_sf_ele until 2026-10-20)
 #   --extract-only  redo only the extraction on an existing fits/ tree (root only)
 # bash-3.2 safe.
 # =============================================================================
@@ -62,7 +63,7 @@ SCHEMES="incl abseta pt ztnp"; DISCS="leppt_mt40"; WINS="full lo hi"
 ASIMOV=0; DRYRUN=0; EXTRACTONLY=0; DO_POSTFIT=1
 OUTROOT="$HERE/pO_idiso_sf_out"
 INDIR="${IDISO_INPUTS:-}"
-INDIR_DEFAULTS="/Users/zhenghuang/pO_analysis/correction/rootfile/idiso_sf_ele /afs/cern.ch/user/z/zheng/pO_analysis/correction/rootfile/idiso_sf_ele"
+INDIR_DEFAULTS="/Users/zhenghuang/pO_analysis/correction/electron_sf_check/idiso_sf/rootfile /afs/cern.ch/user/z/zheng/pO_analysis/correction/electron_sf_check/idiso_sf/rootfile"
 
 while [ $# -gt 0 ]; do
   case "$1" in

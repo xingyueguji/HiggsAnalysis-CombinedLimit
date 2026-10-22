@@ -5,4 +5,5 @@ build/
 install/
 site
 test/pO_fit_out*/
+test/backups/
 .DS_Store

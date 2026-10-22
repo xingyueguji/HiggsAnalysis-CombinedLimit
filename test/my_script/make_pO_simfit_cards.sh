@@ -163,9 +163,16 @@ OUTDIR="${5:?need output dir}"
 DISC="${6:-met}"
 case "$DISC" in
   met)        DISCLABEL="PF MET" ;;
-  leppt)      DISCLABEL="lepton pT" ;;
+  leppt)      DISCLABEL="lepton pT (no m_T cut; SR split at m_T = 30)" ;;  # the nominal since 2026-10-21
   leppt_mt40) DISCLABEL="lepton pT (pT>25 && mT>40 selection)" ;;
+  met_mt40)   DISCLABEL="PF MET (pT>25 && mT>40 selection)" ;;  # 2026-10-20
   *)          DISCLABEL="$DISC" ;;
+esac
+# the m_T > 40 discriminants (lepton pT and, since 2026-10-20, PF MET of the
+# SAME events): their inputs carry the in-fit ABCD templates + CR dirs
+case "$DISC" in
+  leppt_mt40|met_mt40) DISC_MT40=1 ;;
+  *)                   DISC_MT40=0 ;;
 esac
 mkdir -p "$OUTDIR"
 
@@ -187,8 +194,13 @@ mkdir -p "$OUTDIR"
 # primary leppt_mt40, lnN for met / leppt, which keeps those variants runnable
 # instead of exiting 2 and taking the whole simfit with them.  An explicit
 # QCD_MODE=... still wins (QCD_MODE=lnN is the like-for-like comparison).
+# met_mt40 (2026-10-20) is an m_T > 40 input too: abcd by default as well.
+# leppt (2026-10-21, the NOMINAL): the no-m_T lepton-pT fit exists only with its
+# own multijet model, QCD_MODE=mtsplit (see below), so that is its default.
 if [ -z "${QCD_MODE:-}" ]; then
-  if [ "$DISC" = "leppt_mt40" ]; then QCD_MODE=abcd; else QCD_MODE=lnN; fi
+  if [ "$DISC_MT40" = 1 ]; then QCD_MODE=abcd
+  elif [ "$DISC" = "leppt" ]; then QCD_MODE=mtsplit
+  else QCD_MODE=lnN; fi
   echo "[make_pO_simfit_cards] QCD_MODE not set -> default '$QCD_MODE' for disc '$DISC'"
 fi
 QCD_LNN_MU="${QCD_LNN_MU:-1.15}"
@@ -246,35 +258,61 @@ for pair in "$USE_MU|$WMU" "$USE_MU|$ZMU" "$USE_ELE|$WEL" "$USE_ELE|$ZEL"; do
 done
 
 case "$QCD_MODE" in
-  lnN|free|abcd|abcdy) ;;
-  *) echo "[make_pO_simfit_cards] ERROR QCD_MODE='$QCD_MODE' (lnN | free | abcd | abcdy)" >&2; exit 2 ;;
+  lnN|free|abcd|abcdy|mtsplit) ;;
+  *) echo "[make_pO_simfit_cards] ERROR QCD_MODE='$QCD_MODE' (lnN | free | abcd | abcdy | mtsplit)" >&2; exit 2 ;;
 esac
-if { [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; } && [ "$DISC" != "leppt_mt40" ]; then
-  echo "[make_pO_simfit_cards] ERROR: QCD_MODE=$QCD_MODE requires the leppt_mt40 discriminant" >&2
-  echo "  (the qcd_abcd[y] templates + CR dirs exist only in combine_input_W_leppt_mt40.root;" >&2
+if { [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; } && [ "$DISC_MT40" != 1 ]; then
+  echo "[make_pO_simfit_cards] ERROR: QCD_MODE=$QCD_MODE requires an m_T > 40 discriminant (leppt_mt40 | met_mt40)" >&2
+  echo "  (the qcd_abcd[y] templates + CR dirs exist only in combine_input_W_{leppt,met}_mt40.root;" >&2
   echo "   the met fit's QCD is already data-constrained in-fit by its low-MET region)" >&2
   exit 2
 fi
+# QCD_MODE=mtsplit (2026-10-21) <-> disc leppt: the no-m_T input has ONLY the
+# split SR channels (<C>_<B>_y<i>_lo/_hi) with systematics, and the split SR
+# channels exist only there
+if { [ "$QCD_MODE" = "mtsplit" ] && [ "$DISC" != "leppt" ]; } || { [ "$DISC" = "leppt" ] && [ "$QCD_MODE" != "mtsplit" ]; }; then
+  echo "[make_pO_simfit_cards] ERROR: disc leppt (the no-m_T lepton-pT fit) and QCD_MODE=mtsplit go together (got disc $DISC, QCD_MODE $QCD_MODE)" >&2
+  exit 2
+fi
 
-# ---- abcdy (2026-10-19): the rapidity groups, from the W inputs' group sidecar ----
-# <W input minus .root>_abcdy.txt (plotting/mtandmet.C writes it ONLY when every
-# abcdy object is in the input): '<lab|fb> <group> <bin indices>' lines. The
+# ---- abcdy (2026-10-19) / mtsplit (2026-10-21): the rapidity groups, from the W
+# inputs' group sidecar <W input minus .root>_abcdy.txt (plotting/mtandmet.C writes
+# it ONLY when every abcdy object is in the input) or _mtsplit.txt
+# (plotting/combine_input_nomt.C): '<lab|fb> <group> <bin indices>' lines. The
 # sidecars of the flavours in the card must agree (one set of map regexes);
-# every binning must place each of the 12 bins in exactly one group.
+# every binning must place each of the 12 bins in exactly one group. The
+# mtsplit sidecar also carries the measured residual lnN kappas of that
+# flavour's m_T >= 30 multijet (correction/qcd_abcd.C runNoMt; per-bin level
+# version, 2026-10-21b): '#! kappaWin <C> <k>' = the anti-iso window variation
+# (coherent over all bins of the charge) and '#! kappaXfer <lab|fb> <group> <C> <k>'
+# = the m_T < 30 -> >= 30 transfer (measured on all bins since 2026-10-22, so the
+# same k for the three groups; one uncorrelated nuisance per group).
 YSC=""
-if [ "$QCD_MODE" = "abcdy" ]; then
-  for pair in "$USE_MU|$WMU" "$USE_ELE|$WEL"; do
-    [ "${pair%%|*}" = 1 ] || continue
-    sc="${pair#*|}"; sc="${sc%.root}_abcdy.txt"
+if [ "$QCD_MODE" = "abcdy" ] || [ "$QCD_MODE" = "mtsplit" ]; then
+  GSUF="_${QCD_MODE}.txt"
+  for pair in "mu|$USE_MU|$WMU" "ele|$USE_ELE|$WEL"; do
+    fl="${pair%%|*}"; rest="${pair#*|}"
+    [ "${rest%%|*}" = 1 ] || continue
+    sc="${rest#*|}"; sc="${sc%.root}${GSUF}"
     if [ ! -f "$sc" ]; then
-      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: group sidecar not found: $sc" >&2
-      echo "  (regenerate the inputs with plotting/run_combine_inputs.sh after correction/run_qcd_abcd.sh;" >&2
-      echo "   mtandmet.C writes it only when qcd_abcdy and every group CR dir are in the input)" >&2
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=$QCD_MODE: group sidecar not found: $sc" >&2
+      echo "  (regenerate the inputs with plotting/run_combine_inputs.sh after correction/run_qcd_abcd.sh)" >&2
       exit 2
+    fi
+    if [ "$QCD_MODE" = "mtsplit" ]; then
+      # KWIN_<fl>_<C> and KXF_<fl>_<B>_<g>_<C> (bash 3.2: no associative arrays)
+      for Cq in Wp Wm; do
+        kw=$(awk -v C="$Cq" '$1=="#!" && $2=="kappaWin" && $3==C {print $4; exit}' "$sc")
+        [ -n "$kw" ] || { echo "[make_pO_simfit_cards] ERROR $sc has no '#! kappaWin $Cq' line (an input from before the per-bin level? re-run plotting/run_combine_inputs.sh)" >&2; exit 2; }
+        eval "KWIN_${fl}_${Cq}=$kw"
+      done
+      while read -r bq gq cq kq; do
+        eval "KXF_${fl}_${bq}_${gq}_${cq}=$kq"
+      done < <(awk '$1=="#!" && $2=="kappaXfer" {print $3, $4, $5, $6}' "$sc")
     fi
     if [ -z "$YSC" ]; then YSC="$sc"
     elif [ "$(grep -v '^#' "$YSC")" != "$(grep -v '^#' "$sc")" ]; then
-      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: the group sidecars disagree: $YSC vs $sc" >&2; exit 2
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=$QCD_MODE: the group sidecars disagree: $YSC vs $sc" >&2; exit 2
     fi
   done
   for Bchk in lab fb; do
@@ -283,16 +321,39 @@ if [ "$QCD_MODE" = "abcdy" ]; then
             for (i = 3; i <= NF; i++) { if ($i !~ /^[0-9]+$/ || $i + 0 > 11) bad = 1; c[$i + 0]++ } }
           END { for (y = 0; y < 12; y++) if (c[y] != 1) bad = 1; print (ng > 0 && !bad) ? "ok" : "bad" }' "$YSC")
     if [ "$chk" != "ok" ]; then
-      echo "[make_pO_simfit_cards] ERROR QCD_MODE=abcdy: $YSC: the $Bchk groups do not place each of the 12 bins in exactly one group" >&2
+      echo "[make_pO_simfit_cards] ERROR QCD_MODE=$QCD_MODE: $YSC: the $Bchk groups do not place each of the 12 bins in exactly one group" >&2
       exit 2
     fi
   done
-  echo "[make_pO_simfit_cards] abcdy rapidity groups from $(basename "$YSC"):"
+  echo "[make_pO_simfit_cards] $QCD_MODE rapidity groups from $(basename "$YSC"):"
   grep -v '^#' "$YSC" | sed 's/^/    /'
 fi
 ygrp_names() {  # $1 = lab|fb -> the group names, sidecar order
   awk -v B="$1" '!/^#/ && NF > 0 && $1 == B {print $2}' "$YSC"
 }
+# mtsplit residual kappas (on the m_T >= 30 SR multijet only): the sidecars'
+# measured values unless overridden -- QCD_MTSPLIT_WIN_MU/_ELE replace the
+# window kappa of both charges, QCD_MTSPLIT_XFER_MU/_ELE every group's transfer
+# kappa (robustness scans). A transfer kappa missing from the sidecar is an error.
+mts_kwin() {  # $1 = flavour, $2 = charge
+  local ov=""; [ "$1" = mu ] && ov="${QCD_MTSPLIT_WIN_MU:-}"; [ "$1" = ele ] && ov="${QCD_MTSPLIT_WIN_ELE:-}"
+  if [ -n "$ov" ]; then echo "$ov"; else eval "echo \${KWIN_${1}_${2}:-}"; fi
+}
+mts_kxf() {  # $1 = flavour, $2 = binning, $3 = group, $4 = charge
+  local ov=""; [ "$1" = mu ] && ov="${QCD_MTSPLIT_XFER_MU:-}"; [ "$1" = ele ] && ov="${QCD_MTSPLIT_XFER_ELE:-}"
+  if [ -n "$ov" ]; then echo "$ov"; else eval "echo \${KXF_${1}_${2}_${3}_${4}:-}"; fi
+}
+if [ "$QCD_MODE" = "mtsplit" ]; then
+  for F in $FLAVS; do
+    for Bq in lab fb; do
+      for g in $(ygrp_names "$Bq"); do
+        for Cq in Wp Wm; do
+          [ -n "$(mts_kxf "$F" "$Bq" "$g" "$Cq")" ] || { echo "[make_pO_simfit_cards] ERROR no '#! kappaXfer $Bq $g $Cq' for $F in its _mtsplit.txt sidecar" >&2; exit 2; }
+        done
+      done
+    done
+  done
+fi
 ygrp_bins() {   # $1 = lab|fb, $2 = group -> its bin indices, space separated
   awk -v B="$1" -v G="$2" '!/^#/ && $1 == B && $2 == G {for (i = 3; i <= NF; i++) printf "%s%s", (i > 3 ? " " : ""), $i; print ""}' "$YSC"
 }
@@ -394,15 +455,21 @@ case "$SF_TRIG_CORR" in
   perbin|coherent) ;;
   *) echo "[make_pO_simfit_cards] ERROR SF_TRIG_CORR='$SF_TRIG_CORR' (auto | perbin | coherent)" >&2; exit 2 ;;
 esac
-# theory vs lepton-SF vs fake-factor-QCD split (the --freezeNuisanceGroups groups)
-THNAMES=""; SFNAMES=""; QFNAMES=""
+# theory vs lepton-SF vs fake-factor-QCD vs MET-resolution split (the
+# --freezeNuisanceGroups groups; metRes* = the met_mt40 inputs' MC MET
+# smearing, 2026-10-20, group metres)
+THNAMES=""; SFNAMES=""; QFNAMES=""; MRNAMES=""
 for s in $LHENAMES; do
   case " $LHE_THEORY " in
     *" $s "*) THNAMES="$THNAMES $s" ;;
-    *) case "$s" in qcdFF_*) QFNAMES="$QFNAMES $s" ;; *) SFNAMES="$SFNAMES $s" ;; esac ;;
+    *) case "$s" in
+         qcdFF_*)  QFNAMES="$QFNAMES $s" ;;
+         metRes*)  MRNAMES="$MRNAMES $s" ;;
+         *)        SFNAMES="$SFNAMES $s" ;;
+       esac ;;
   esac
 done
-THNAMES="${THNAMES# }"; SFNAMES="${SFNAMES# }"; QFNAMES="${QFNAMES# }"
+THNAMES="${THNAMES# }"; SFNAMES="${SFNAMES# }"; QFNAMES="${QFNAMES# }"; MRNAMES="${MRNAMES# }"
 # fifth `shapes` token (Combine appends Up/Down to $SYSTEMATIC); empty when no systs
 SY=""; [ "$NLHE" -gt 0 ] && SY='_$SYSTEMATIC'
 
@@ -468,11 +535,22 @@ gen_simfit_card() {  # $1 = lab | fb
   #  B_g*C40_g/D_g, scaled by the group's formula)
   QPATH="qcd"; [ "$QCD_MODE" = "abcd" ] && QPATH="qcd_abcd"
   [ "$QCD_MODE" = "abcdy" ] && QPATH="qcd_abcdy"
+  # mtsplit (2026-10-21): TWO SR channels per (flavour, charge, y bin), m_T < 30
+  # (<..>_y<i>_lo, = the ABCD region B) and m_T >= 30 (_hi), from the input dirs
+  # of the same names; their qcd column (histogram qcd = the scheme-C template,
+  # T_y x f(pT) x group anti-iso shape x the bin's anti-iso count) carries two
+  # plain rateParams that MULTIPLY (ModelTools: one factor per rateParam of a
+  # bin/process): the BIN's level qcd_sT_<F>_<C>_y<i> (free, shared by its two
+  # channels; per group until 2026-10-21b) and the bin's anchor qcd_sD (lo) /
+  # qcd_sH (hi), which also scales its 1-bin anti-iso CRD / CRH count below.
+  PARTS="-"; [ "$QCD_MODE" = "mtsplit" ] && PARTS="lo hi"
   for F in $FLAVS; do
     if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
     for C in Wp Wm; do
       for iy in $YBINS; do
-        R="${C}_${B}_y${iy}"; CH="${F}_${R}"
+       for P in $PARTS; do
+        if [ "$P" = "-" ]; then R="${C}_${B}_y${iy}"; else R="${C}_${B}_y${iy}_${P}"; fi
+        CH="${F}_${R}"
         SHAPES="${SHAPES}
 shapes data_obs ${CH} ${WF} ${R}/data_obs
 shapes signal   ${CH} ${WF} ${R}/signal${SY:+ ${R}/signal$SY}
@@ -505,20 +583,37 @@ qcd_norm_${CH} rateParam ${CH} qcd 1 [0,10]"
           #  shared by its rapidity groups)
           if [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; then
             K="$QCD_ABCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_ABCD_LNN_ELE"
+          elif [ "$QCD_MODE" = "mtsplit" ]; then
+            # the residual only on the m_T >= 30 multijet (the part extrapolated
+            # across m_T); the m_T < 30 one is region B itself. These 4 rows
+            # (qcd_rate_<F>_<C>) carry the anti-iso WINDOW term, coherent over all
+            # bins of the charge; the per-group transfer rows qcd_xfer_* are
+            # appended after the columns are complete (see the systematics block)
+            K=$(mts_kwin "$F" "$C")
           else
             K="$QCD_LNN_MU"; [ "$F" = "ele" ] && K="$QCD_LNN_ELE"
           fi
           H=" - - - - - ${K}"; N=" - - - - - -"
+          [ "$P" = "lo" ] && H="$N"
           case "${F}_${C}" in
             mu_Wp)  SQMWP="$SQMWP$H"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$N" ;;
             mu_Wm)  SQMWP="$SQMWP$N"; SQMWM="$SQMWM$H"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$N" ;;
             ele_Wp) SQMWP="$SQMWP$N"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$H"; SQEWM="$SQEWM$N" ;;
             ele_Wm) SQMWP="$SQMWP$N"; SQMWM="$SQMWM$N"; SQEWP="$SQEWP$N"; SQEWM="$SQEWM$H" ;;
           esac
+          if [ "$QCD_MODE" = "mtsplit" ]; then
+            # per rapidity BIN (2026-10-21b): the bin's own level qcd_sT (pinned
+            # by its m_T < 30 channel) x its own anti-iso anchor qcd_sD / qcd_sH
+            if [ "$P" = "lo" ]; then AN="D"; else AN="H"; fi
+            RP="${RP}
+qcd_sT_${F}_${C}_y${iy} rateParam ${CH} qcd 1 [0,10]
+qcd_s${AN}_${F}_${C}_y${iy} rateParam ${CH} qcd 1 [0,10]"
+          fi
         fi
         SLUMI="$SLUMI ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} ${LUMI_LNN} -"
         STTX="$STTX - - - - ${TTBAR_LNN} -"
         NCH=$((NCH+1))
+       done
       done
     done
   done
@@ -666,6 +761,42 @@ qcd_abcd_${F}_${C}${GS} rateParam ${F}_${C}_${B}_y${iy} qcd (@0*@1/@2) ${FARGS}"
     done
   fi
 
+  # ---- mtsplit anchors (2026-10-21; per rapidity BIN since 2026-10-21b): the
+  # 1-bin anti-iso counts CRD (m_T < 30) and CRH (m_T >= 30) of every bin, input
+  # dirs <C>_<B>_y<i>_CR{D,H} (plotting/combine_input_nomt.C): qcd = the
+  # QCD-only count (scaled by qcd_sD / qcd_sH, the same parameters as on the SR
+  # qcd of the matching channel) + one frozen ewk (lumi only). Region B has NO
+  # CR: it is the m_T < 30 SR channel, so its pT spectrum measures the level qcd_sT.
+  if [ "$QCD_MODE" = "mtsplit" ]; then
+    for F in $FLAVS; do
+      if [ "$F" = "mu" ]; then WF="$WMU"; else WF="$WEL"; fi
+      for C in Wp Wm; do
+        for iy in $YBINS; do
+          for AN in D H; do
+            CH="${F}_${C}_${B}_y${iy}_CR${AN}"
+            SHAPES="${SHAPES}
+shapes data_obs ${CH} ${WF} ${C}_${B}_y${iy}_CR${AN}/data_obs
+shapes qcd      ${CH} ${WF} ${C}_${B}_y${iy}_CR${AN}/qcd
+shapes ewk      ${CH} ${WF} ${C}_${B}_y${iy}_CR${AN}/ewk"
+            BINL="$BINL $CH"; OBSL="$OBSL -1"
+            MB="$MB $CH $CH"
+            MP="$MP qcd ewk"
+            MI="$MI 4 7"
+            MR="$MR -1 -1"
+            SQMWP="$SQMWP - -"; SQMWM="$SQMWM - -"
+            SQEWP="$SQEWP - -"; SQEWM="$SQEWM - -"
+            SLUMI="$SLUMI - ${LUMI_LNN}"
+            STTX="$STTX - -"
+            lhe_append CR "$F" qcd ewk
+            RP="${RP}
+qcd_s${AN}_${F}_${C}_y${iy} rateParam ${CH} qcd 1 [0,10]"
+            NCH=$((NCH+1))
+          done
+        done
+      done
+    done
+  fi
+
   # ---- systematics block: lumi + ttbar_xsec always; the 4 QCD lnN rows only in lnN mode ----
   SYST="
 ${SLUMI}
@@ -682,6 +813,33 @@ ${SQMWM}"
       SYST="${SYST}
 ${SQEWP}
 ${SQEWM}"
+    fi
+    # mtsplit (2026-10-21b): the per-group TRANSFER rows qcd_xfer_<F>_<C>_<g> --
+    # kappa on the m_T >= 30 qcd columns of the group's bins only (the
+    # m_T < 30 -> >= 30 transfer, measured per group; uncorrelated between
+    # groups), built from the FINISHED column lists so every row is aligned by
+    # construction (column 1 of MB/MP is the 'bin'/'process' label)
+    if [ "$QCD_MODE" = "mtsplit" ]; then
+      for F in $FLAVS; do
+        for C in Wp Wm; do
+          for G in $(ygrp_names "$B"); do
+            K=$(mts_kxf "$F" "$B" "$G" "$C")
+            ROW=$(awk -v mb="$MB" -v mp="$MP" -v pre="${F}_${C}_${B}_y" -v gb=" $(ygrp_bins "$B" "$G") " -v k="$K" 'BEGIN {
+                    n = split(mb, b, " "); split(mp, p, " "); out = ""
+                    for (i = 2; i <= n; i++) {
+                      v = "-"
+                      if (p[i] == "qcd" && index(b[i], pre) == 1 && b[i] ~ /_hi$/) {
+                        y = substr(b[i], length(pre) + 1); sub(/_hi$/, "", y)
+                        if (index(gb, " " y " ") > 0) v = k
+                      }
+                      out = out " " v
+                    }
+                    print out }')
+            SYST="${SYST}
+$(printf '%-17s' "qcd_xfer_${F}_${C}_${G}") lnN${ROW}"
+          done
+        done
+      done
     fi
   fi
   # shape rows (2026-09-07 LHE, 2026-09-14 lepton SFs, 2026-09-29 the
@@ -702,7 +860,7 @@ ${SLHE[$i]}"; KEPT="$KEPT $s" ;;
     i=$((i+1))
   done
   keep_only() { local out="" s; for s in $1; do case " $KEPT " in *" $s "*) out="$out $s" ;; esac; done; echo "${out# }"; }
-  THK=$(keep_only "$THNAMES"); SFK=$(keep_only "$SFNAMES"); QFK=$(keep_only "$QFNAMES")
+  THK=$(keep_only "$THNAMES"); SFK=$(keep_only "$SFNAMES"); QFK=$(keep_only "$QFNAMES"); MRK=$(keep_only "$MRNAMES")
   # muTrig per-bin decorrelation (2026-09-14, SF_TRIG_CORR=perbin): the MB
   # trigger SF's per-y errors are pure statistics, so the ONE coherent template
   # variation is split into 12 independent nuisances muTrig_y<i> -- one per
@@ -722,7 +880,7 @@ nuisance edit rename * mu_W[pm]_${B}_y${iy} muTrig muTrig_y${iy}"
       done ;;
     esac
   fi
-  NUISLIST="$THK $SFALL $QFK"   # every shape nuisance of the card, post-edit names (for the sidecar)
+  NUISLIST="$THK $SFALL $QFK $MRK"   # every shape nuisance of the card, post-edit names (for the sidecar)
   LHEDESC="no shape systematics (LHE_SYST=${LHE_SYST})"
   if [ "$NLHE" -gt 0 ]; then
     [ -n "$THK" ] && SYST="${SYST}
@@ -731,8 +889,11 @@ lhe group = ${THK}"
 lepsf group = ${SFALL}"
     [ -n "$QFK" ] && SYST="${SYST}
 qcdff group = ${QFK}"
+    [ -n "$MRK" ] && SYST="${SYST}
+metres group = ${MRK}"
     LHEDESC="shape systematics -- theory (group lhe): ${THK:-none}; lepton SFs (group lepsf): ${SFALL:-none}; <proc>_<syst>Up/Down from the input files' sidecars, entries only on the columns of the inputs listing them"
     [ -n "$QFK" ] && LHEDESC="${LHEDESC}; fake-factor QCD slopes (group qcdff): ${QFK} on the SR ${QPATH} of their charge"
+    [ -n "$MRK" ] && LHEDESC="${LHEDESC}; MC MET resolution (group metres): ${MRK}"
     [ -n "$SFEDIT" ] && LHEDESC="${LHEDESC}; muTrig decorrelated per rapidity bin via nuisance edit rename (SF_TRIG_CORR=perbin)"
   fi
   # the kappas / CR count of the flavours in the card (grand card: the
@@ -748,12 +909,19 @@ qcdff group = ${QFK}"
   elif [ "$QCD_MODE" = "abcdy" ]; then
     NGRP=$(ygrp_names "$B" | wc -l | tr -d ' ')
     QDESC="QCD in-fit ABCD PER RAPIDITY GROUP (abcdy; $(ygrp_names "$B" | tr '\n' ' ' | sed 's/ $//')): $((NCR * NGRP)) CR channels + one (sB*sC/sD) formula per (flavour, charge, group) on the SR qcd_abcdy; residual lnN ${KDA} shared by the groups; CRB W-part ${QCD_WCR}"
+  elif [ "$QCD_MODE" = "mtsplit" ]; then
+    NGRP=$(ygrp_names "$B" | wc -l | tr -d ' ')
+    KDM=""
+    for F in $FLAVS; do KDM="${KDM:+$KDM, }$F window $(mts_kwin "$F" Wp)/$(mts_kwin "$F" Wm)"; done
+    QDESC="QCD scheme C (mtsplit, per-bin level; shape per group $(ygrp_names "$B" | tr '\n' ' ' | sed 's/ $//')): SR split at m_T = 30 (lo = region B, hi), free bin level qcd_sT x anti-iso anchor qcd_sD (lo) / qcd_sH (hi) with $((48 * (USE_MU + USE_ELE))) 1-bin CRD/CRH channels; residual lnN on the m_T >= 30 qcd only: ${KDM} (W+/W-, coherent) + ${NGRP} transfer rows per flavour x charge (qcd_xfer_*)"
   else
     QDESC="QCD lnN (ABCD) per flavour x charge: ${KDL}"
   fi
+  WCHT="48 W channels ({mu,ele} x {Wp,Wm} x y0..11)"
+  [ "$QCD_MODE" = "mtsplit" ] && WCHT="96 W channels ({mu,ele} x {Wp,Wm} x y0..11 x m_T<30|>=30)"
   if [ "$USE_MU" = 1 ] && [ "$USE_ELE" = 1 ]; then
     CARDHEAD="# Auto-generated by make_pO_simfit_cards.sh -- GRAND SIMULTANEOUS FIT, ${B} binning,
-# ${DISCLABEL} W discriminant.  48 W channels ({mu,ele} x {Wp,Wm} x y0..11) + both
+# ${DISCLABEL} W discriminant.  ${WCHT} + both
 # Z-inclusive peaks in ONE likelihood.  The 25-POI model (r_<C>_y<i> shared mu/e,
 # + global r_Z on all DY-related MC) is applied at text2workspace time via
 # multiSignalModel with the maps in t2w_maps_simfit_${B}.txt.
@@ -797,7 +965,12 @@ EOF
   : > "$MAPS"
   for C in Wp Wm; do
     for iy in $YBINS; do
-      echo "map=${FLAVRE}_${C}_${B}_y${iy}/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      if [ "$QCD_MODE" = "mtsplit" ]; then
+        # both m_T channels of the bin share its r (the _(lo|hi)/ keeps y1 off y10)
+        echo "map=${FLAVRE}_${C}_${B}_y${iy}_(lo|hi)/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      else
+        echo "map=${FLAVRE}_${C}_${B}_y${iy}/(signal|wtau)\$:r_${C}_y${iy}[1,0,10]" >> "$MAPS"
+      fi
     done
   done
   if [ "$QCD_MODE" = "abcd" ] && [ "$QCD_WCR" != "frozen" ]; then
@@ -906,6 +1079,8 @@ write_sigma_maps() {
         # plain map= line would push it into the POI set as a bare variable and
         # collide with the RooFormulaVar.
         pat = sprintf("%s_%s_%s_y%s/(signal|wtau)$", FRE, C, B, iy)
+        if (QMODE == "mtsplit") # (2026-10-21) the two m_T channels of the bin
+          pat = sprintf("%s_%s_%s_y%s_(lo|hi)/(signal|wtau)$", FRE, C, B, iy)
         if (QMODE == "abcd" && QWCR != "frozen")
           pat = pat sprintf(",%s_%s_CRB/w_y%s$", FRE, C, iy)
         else if (QMODE == "abcdy" && QWCR != "frozen")
@@ -935,6 +1110,9 @@ gen_simfit_card fb
 KQM="$QCD_LNN_MU"; KQE="$QCD_LNN_ELE"
 if [ "$QCD_MODE" = "free" ]; then KQM=0; KQE=0; fi
 if [ "$QCD_MODE" = "abcd" ] || [ "$QCD_MODE" = "abcdy" ]; then KQM="$QCD_ABCD_LNN_MU"; KQE="$QCD_ABCD_LNN_ELE"; fi
+# mtsplit: kQcd* = the W+ window kappa (display only -- the extractor reads
+# every window and transfer kappa from the mtsplitKappas line below)
+if [ "$QCD_MODE" = "mtsplit" ]; then KQM=$(mts_kwin mu Wp); KQE=$(mts_kwin ele Wp); KQM="${KQM:-0}"; KQE="${KQE:-0}"; fi
 # lheSysts (2026-09-07): ALL shape nuisances in the cards, comma-joined, by
 # their POST-EDIT names (theory + lepton SFs incl. the per-bin muTrig_y<i> +
 # since 2026-09-29 the qcdFF_* fake-factor slopes; "none" when off/absent)
@@ -962,7 +1140,7 @@ EOF
 #   lab:fwd=10,11/bwd=0,1/cen=2,...,9;fb:fwd=...
 # run_pO_fits.sh passes it to the extractor (per-group scales + multipliers).
 # Absent in every other mode, so the abcd/lnN/free sidecars are unchanged.
-if [ "$QCD_MODE" = "abcdy" ]; then
+if [ "$QCD_MODE" = "abcdy" ] || [ "$QCD_MODE" = "mtsplit" ]; then  # (mtsplit since 2026-10-21)
   QGTOK=""
   for Bq in lab fb; do
     part=""
@@ -970,6 +1148,21 @@ if [ "$QCD_MODE" = "abcdy" ]; then
     QGTOK="${QGTOK:+$QGTOK;}$Bq:$part"
   done
   echo "qcdGroups $QGTOK" >> "$OUTDIR/qcd_lnn_kappas.txt"
+fi
+# mtsplitKappas (2026-10-21b): every residual kappa of THESE cards, ONE token,
+#   win:mu_Wp=1.067,...;xfer:lab_fwd_mu_Wp=1.18,...,fb_cen_ele_Wm=...
+# -> the extractor's m_T >= 30 multiplier sT x sH x kwin^theta x kxfer^theta
+if [ "$QCD_MODE" = "mtsplit" ]; then
+  WT=""; XT=""
+  for F in $FLAVS; do
+    for Cq in Wp Wm; do
+      WT="${WT:+$WT,}${F}_${Cq}=$(mts_kwin "$F" "$Cq")"
+      for Bq in lab fb; do
+        for g in $(ygrp_names "$Bq"); do XT="${XT:+$XT,}${Bq}_${g}_${F}_${Cq}=$(mts_kxf "$F" "$Bq" "$g" "$Cq")"; done
+      done
+    done
+  done
+  echo "mtsplitKappas win:${WT};xfer:${XT}" >> "$OUTDIR/qcd_lnn_kappas.txt"
 fi
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (flavours: ${FLAVS}; W discriminant: ${DISCLABEL})"
