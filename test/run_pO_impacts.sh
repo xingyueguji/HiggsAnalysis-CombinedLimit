@@ -12,7 +12,13 @@
 #   2. per-nuisance fits: each constrained nuisance fixed at its +-1sigma
 #      postfit values, everything else re-profiled (2026-08-17 lnN model:
 #      qcd_rate_{mu,ele}_{Wp,Wm} x4 + lumi = 5 nuisances -> ~11 fits/variant)
-#   3. impacts_simfit_<B>.json -> one PDF per requested POI (plotImpacts --POI)
+#   3. impacts_simfit_<B>.json, split (2026-10-22, user request) into
+#      impacts_simfit_<B>_constrained.json (the constrained nuisances: lnN,
+#      shape -- the ones with a pull) and impacts_simfit_<B>_free.json (the
+#      free rateParams: r_*, qcd_s*, ... -- plotImpacts prints their fitted
+#      value instead of a pull) -> per requested POI two PDFs,
+#      impacts_simfit_<B>_<poi>_constrained.pdf and ..._<poi>_free.pdf
+#      (plotImpacts --POI; 30 parameters per page, sorted by impact)
 #
 # Covariance (my_script/plot_pO_cov.C, needs only root -- can also be re-run
 # locally on a downloaded tree, where fitDiagnostics is absent: it then skips
@@ -103,6 +109,31 @@ fi
 
 run() { echo "+ $*"; if [ "$DRY" -eq 0 ]; then "$@"; fi; }
 
+# Split an impacts json in two by the parameter "type" combineTool writes:
+# <stem>_constrained.json (every type but "Unconstrained" = the nuisances
+# with a pull) and <stem>_free.json (type "Unconstrained" = the free
+# rateParams). A part with no parameters is not written (and a stale copy is
+# removed), so plotImpacts never gets an empty list.
+split_impacts() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+src = sys.argv[1]
+with open(src) as f:
+    data = json.load(f)
+stem = src[:-5] if src.endswith(".json") else src
+for tag, want_free in (("constrained", False), ("free", True)):
+    part = dict(data)
+    part["params"] = [p for p in data.get("params", []) if (p.get("type") == "Unconstrained") == want_free]
+    out = stem + "_" + tag + ".json"
+    if part["params"]:
+        with open(out, "w") as f:
+            json.dump(part, f, indent=1)
+    elif os.path.exists(out):
+        os.remove(out)
+    print("  split: %3d %-11s parameters -> %s" % (len(part["params"]), tag, out if part["params"] else "(none, not written)"))
+PY
+}
+
 err=0; DONE_FITS=""
 # one fit: its work dir + the prefix of its summary files (run_pO_fits.sh)
 do_fit() {
@@ -147,11 +178,17 @@ do_fit() {
         if [ "$DRY" -eq 0 ] && [ ! -f "$JSON" ]; then
           echo "[FAIL impacts] $FDIR/simfit_$B: no $JSON produced"; err=1; continue
         fi
-        for P in $POIS; do
-          run plotImpacts.py -i "$JSON" -o "$IMP/impacts_simfit_${B}_${P}" --POI "$P" \
-            || { echo "[warn] plotImpacts failed for POI $P ($FDIR/$B)"; err=1; }
+        # two plots per POI: the constrained nuisances (pulls) and the free parameters
+        if [ "$DRY" -eq 1 ]; then echo "+ split_impacts $JSON"; else split_impacts "$JSON" || err=1; fi
+        for PART in constrained free; do
+          PJ="${JSON%.json}_${PART}.json"
+          if [ "$DRY" -eq 0 ] && [ ! -f "$PJ" ]; then continue; fi   # no parameters of that kind
+          for P in $POIS; do
+            run plotImpacts.py -i "$PJ" -o "$IMP/impacts_simfit_${B}_${P}_${PART}" --POI "$P" \
+              || { echo "[warn] plotImpacts failed for POI $P, $PART ($FDIR/$B)"; err=1; }
+          done
         done
-        echo "  -> $IMP/impacts_simfit_${B}_<poi>.pdf"
+        echo "  -> $IMP/impacts_simfit_${B}_<poi>_{constrained,free}.pdf"
       fi
     fi
 
