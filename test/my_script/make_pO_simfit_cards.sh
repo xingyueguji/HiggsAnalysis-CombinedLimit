@@ -169,14 +169,22 @@ esac
 mkdir -p "$OUTDIR"
 
 # ---- systematics config (env-overridable) -----------------------------------
-# QCD lnN kappas derived 2026-08-17 from the qcd_abcd.C printout (per component,
-# combined in quadrature; same value for both charges of a flavour):
-#   mu : stat 9%  (Terr 8.3%, anti-iso mt40 count 3.9%)  (+) T-plane transport
-#        10% (m_T-plane vs MET-plane T: 9.7%/10.8%)      (+) anti-iso tilt  5%
-#        = 14.4%  -> 1.15
-#   ele: stat 4%  (Terr 3.2%, anti-iso mt40 count 2.4%)  (+) transport 10%
-#        (9.1% e+, ~0% e- taken as accidental)           (+) anti-iso tilt 15%
-#        = 18.5%  -> 1.20
+# QCD lnN kappas of the met fit (QCD_MODE=lnN), since 2026-10-26 (user
+# decision) = the Oct-22 correction/logs/qcd_abcd_{mu,ele}.log "systematic
+# budget on the multijet normalisation", line "lnN kappa EXCLUDING the
+# transport row" (max of the two charges; components in quadrature):
+#   mu : stat on T 6.9/6.8% (+) sideband stat 3.8/3.8% (+) anti-iso window
+#        12.8/9.6% (+) anti-iso tilt 0.6/2.7%  (mu+/mu-)            -> 1.15
+#   ele: stat on T 3.4/3.3% (+) sideband stat 3.7/3.6% (+) anti-iso window
+#        26.2/17.6% (+) anti-iso tilt 7.5/8.0%  (e+/e-)             -> 1.28
+# The plane-transport row (m_T vs MET plane T: 22.8/18.8% mu, 14.6/11.6% e) is
+# left out for both flavours (user decision; with it: mu 1.27, e 1.31). For the
+# muon the log's r-scan has the two planes agree at r = 1.21, i.e. near the
+# fitted r, so that row is the prefit W normalization and would double-count
+# the signal strength. For the electron the scan does NOT cross in r = 1.0-1.3
+# (the spread falls only from 11.6% to 6.2% for e-), which the log reads as a
+# genuine iso-recoil correlation. Before 2026-10-26: mu 1.15 / e 1.20, derived
+# 2026-08-17 on the pre-WP90 electron selection.
 # Override for robustness scans, e.g.  QCD_LNN_MU=1.3 QCD_LNN_ELE=1.3 ./run_pO_fits.sh ...
 # QCD_MODE is DISC-DEPENDENT (2026-10-26, user decision: one multijet model per
 # fit): abcdy for leppt_mt40 (its only model -- the qcd_abcdy template and the
@@ -187,18 +195,23 @@ if [ -z "${QCD_MODE:-}" ]; then
   echo "[make_pO_simfit_cards] QCD_MODE not set -> default '$QCD_MODE' for disc '$DISC'"
 fi
 QCD_LNN_MU="${QCD_LNN_MU:-1.15}"
-QCD_LNN_ELE="${QCD_LNN_ELE:-1.20}"
+QCD_LNN_ELE="${QCD_LNN_ELE:-1.28}"
 # abcdy-mode REDUCED kappas (residual on the SR qcd only: anti-iso window (+)
 # the fake-factor total shift; stat is profiled by the CR channels and the
-# plane-transport row does not apply). From correction/logs/qcd_abcd_*.log
-# (2026-08-23): mu window 9.5% (+) FF 5.5% -> 1.09 (tilt- and FF-based agree).
-# ele since 2026-09-29: the SR template IS fake-factor weighted and its slope
-# uncertainty is the qcdFF_ele_<C> shape nuisance, so neither the FF-shift nor
-# the tilt row remains -- only the anti-iso window variation of the FF-weighted
-# total: 4.5% (e+) / 4.1% (e-) -> 1.045, rounded up to 1.05 (qcd_abcd_ele.log,
-# "residual lnN kappa of the FF model"). Until then: window (+) FF shift -> 1.15.
-QCD_ABCD_LNN_MU="${QCD_ABCD_LNN_MU:-1.09}"
-QCD_ABCD_LNN_ELE="${QCD_ABCD_LNN_ELE:-1.05}"
+# plane-transport row does not apply). Since 2026-10-26 (user decision) from
+# the Oct-22 correction/logs/qcd_abcd_*.log (max of the two charges):
+#   mu : "in-fit ABCD reduced lnN kappa" = anti-iso window 10.1%/3.0% (+) tilt
+#        0.6%/2.7% (mu+/mu-) -> 1.10 (the FF-shift variant gives 1.10 too)
+#   ele: the SR template IS fake-factor weighted and its slope uncertainty is
+#        the qcdFF_ele_<C> shape nuisance, so neither the FF-shift nor the tilt
+#        row remains -- "residual lnN kappa of the FF model" = the anti-iso
+#        window variation of the FF-weighted total, 4.5% (e+) / 9.9% (e-)
+#        -> 1.099, rounded up to 1.10
+# Before 2026-10-26: mu 1.09 (2026-08-23 log, window 9.5% (+) FF 5.5%), ele 1.05
+# (2026-09-29 log, FF window 4.5%/4.1%; before 2026-09-29 window (+) FF shift
+# -> 1.15).
+QCD_ABCD_LNN_MU="${QCD_ABCD_LNN_MU:-1.10}"
+QCD_ABCD_LNN_ELE="${QCD_ABCD_LNN_ELE:-1.10}"
 QCD_WCR="${QCD_WCR:-float}"        # abcdy-mode CRB W content: float (per-y w_y*
                                    #  mapped to the r POIs) | frozen (wfix at
                                    #  absolute MC; add ~2%/1% residual to kappa)
