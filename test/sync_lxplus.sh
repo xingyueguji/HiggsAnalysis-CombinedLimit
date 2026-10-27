@@ -7,13 +7,13 @@
 # Usage:
 #   ./sync_lxplus.sh upload           # inputs + scripts (everything needed to fit)
 #   ./sync_lxplus.sh upload-inputs    # only the structured Combine input files
-#                                     # (4 required MET/Z + up to 4 optional
-#                                     #  lepton-pT variant W files, if built)
+#                                     # (4 required MET/Z + the 2 optional
+#                                     #  leppt_mt40 W files, if built)
 #   ./sync_lxplus.sh upload-scripts   # only the pipeline scripts
 #   ./sync_lxplus.sh download         # pull, for every out-tree present
-#                                     # (pO_fit_out[_leppt[_mt40]], and since
-#                                     # 2026-10-19 pO_fit_out_leppt_mt40_abcdy =
-#                                     # the QCD_MODE=abcdy fit) and for each
+#                                     # (pO_fit_out = met, pO_fit_out_leppt_mt40
+#                                     # = leppt_mt40 abcdy; the other discs were
+#                                     # removed 2026-10-26) and for each
 #                                     # fit in it -- simfit/ (grand) and, when
 #                                     # run, simfit_mu/ + simfit_ele/ (flavfit,
 #                                     # 2026-09-22; same layout, same pulls):
@@ -110,30 +110,25 @@ upload_inputs() {
     echo "[ERROR] missing input(s) -- run Steps 1-3 (skim, run_ngen, qcd_abcd, mtandmet/dileptonpeak) first."
     err=1; return
   fi
-  # optional: the lepton-pT discriminant variants (2026-07-30) and the MET
-  # counterpart of leppt_mt40 (met_mt40, 2026-10-20). Uploaded when present; a
-  # missing variant is only a note, not an error.
+  # optional: the lepton-pT discriminant (m_T > 40, 2026-07-30). Uploaded when
+  # present; a missing file is only a note, not an error. (The no-m_T leppt and
+  # met_mt40 inputs were removed 2026-10-26.)
   SEND="plots/combine_input_W.root plots/combine_input_Z.root plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root"
-  for f in plots/combine_input_W_leppt.root plots/combine_input_W_leppt_mt40.root plots/combine_input_W_met_mt40.root \
-           plots/Elec/combine_input_W_leppt.root plots/Elec/combine_input_W_leppt_mt40.root \
-           plots/Elec/combine_input_W_met_mt40.root; do
+  for f in plots/combine_input_W_leppt_mt40.root plots/Elec/combine_input_W_leppt_mt40.root; do
     if [ -f "$ANA_LOCAL/plotting/$f" ]; then SEND="$SEND $f"
     else echo "[note] optional variant not built (skipped): $f"; fi
   done
   # the LHE shape-systematics sidecars (2026-09-07, <input>_systs.txt): the card
   # generator reads them next to the inputs, so they must travel together
   # + the abcdy group sidecars (2026-10-19, <W input>_abcdy.txt, written by
-  # plotting/mtandmet.C next to combine_input_W_leppt_mt40.root): QCD_MODE=abcdy
-  # refuses to build cards without them
+  # plotting/mtandmet.C next to combine_input_W_leppt_mt40.root): the leppt_mt40
+  # cards (QCD_MODE=abcdy, the only model since 2026-10-26) cannot be built
+  # without them
   local sc
   for f in $SEND; do
     sc="${f%.root}_systs.txt"
     [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
     sc="${f%.root}_abcdy.txt"
-    [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
-    # + the mtsplit group sidecar of the no-m_T input (2026-10-21, groups + kappaWin/kappaXfer;
-    # QCD_MODE=mtsplit refuses to build cards without it)
-    sc="${f%.root}_mtsplit.txt"
     [ -f "$ANA_LOCAL/plotting/$sc" ] && SEND="$SEND $sc"
   done
   rmkdir "$ANA_LX/plotting"
@@ -176,10 +171,11 @@ upload_scripts() {
 }
 
 download_results() {
-  # one out-tree per discriminant: "" (PF MET), _leppt, _leppt_mt40, _met_mt40
-  # (2026-10-20) + the QCD_MODE=abcdy fits' own trees (2026-10-19)
+  # one out-tree per discriminant: "" (PF MET) and _leppt_mt40 (since
+  # 2026-10-26 the only two; _leppt, _met_mt40 and the separate *_abcdy trees
+  # are gone -- abcdy now lives in pO_fit_out_leppt_mt40/)
   local got=0
-  for sfx in "" "_leppt" "_leppt_mt40" "_leppt_mt40_abcdy" "_met_mt40" "_met_mt40_abcdy"; do
+  for sfx in "" "_leppt_mt40"; do
     local tree="pO_fit_out${sfx}"
     echo "== download fit results <- $LX:$FORK_LX/test/$tree/ =="
     # (the legacy per-channel trees <tree>/{mu,ele}/ are no longer pulled: that
@@ -208,7 +204,7 @@ download_results() {
     fi
     # datacards (2026-08-24): the cards + t2w maps + qcd_lnn_kappas.txt sidecar
     # ACTUALLY FITTED on lxplus. Local --dry-run regenerates the local copies
-    # with local env defaults (e.g. QCD_MODE=lnN instead of abcd), so without
+    # with local env defaults (e.g. other kappa overrides), so without
     # this pull the local cards/sidecar silently disagree with the downloaded
     # summary. Plus impacts + covariance plots (run_pO_impacts.sh, 2026-08-17):
     # pulled whenever present -- the json + per-POI PDFs and correlation
@@ -334,31 +330,23 @@ case "$CMD" in
     echo "[sync_lxplus] upload done. Next, on lxplus:"
     echo "    ssh $LX"
     echo "    cd <CMSSW>/src && cmsenv && cd $FORK_LX/test"
-    echo "    # DEFAULT (since 2026-10-21): simfit (mu+e in one likelihood), --disc leppt = the"
-    echo "    # no-m_T lepton-pT fit (QCD_MODE=mtsplit) -> pO_fit_out_leppt/, and THREE fits per"
-    echo "    # binning variant -- nominal + --statonly (the stat error) + --contour (sigma_W as a POI):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov"
-    echo "    # the mu-only and e-only fits (flavfit: the same model, one flavour each):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both flavfit --asimov"
-    echo "    # or ALL THREE (grand + mu-only + e-only) in one go:"
+    echo "    # DEFAULT (since 2026-10-26): --disc leppt_mt40 = lepton pT at m_T > 40 with the"
+    echo "    # rapidity-resolved in-fit ABCD (QCD_MODE=abcdy) -> pO_fit_out_leppt_mt40/, grand fit +"
+    echo "    # mu-only + e-only, THREE fits per binning variant -- nominal + --statonly (the stat"
+    echo "    # error) + --contour (sigma_W as a POI):"
     echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
-    echo "    # the m_T > 40 lepton-pT fit (kept for later; QCD_MODE=abcd):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov --disc leppt_mt40"
-    echo "    # backup discriminant, PF MET (defaults to QCD_MODE=lnN):"
-    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both simfit --asimov --disc met"
-    echo "    # OPT-IN rapidity-resolved in-fit ABCD (fwd/bwd/cen groups) -> its own tree pO_fit_out_leppt_mt40_abcdy/:"
-    echo "    QCD_MODE=abcdy PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov"
-    echo "    # the MET counterpart of leppt_mt40 (same events, PF MET; 2026-10-20) -> pO_fit_out_met_mt40[_abcdy]/:"
-    echo "    QCD_MODE=abcdy PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov --disc met_mt40"
-    echo "    # then impacts + covariance plots (pulled by 'download'; --fit mu|ele for flavfit):"
-    echo "    ./run_pO_impacts.sh --disc leppt --fit all" ;;
+    echo "    # the PF-MET fit (no m_T cut; QCD_MODE=lnN) -> pO_fit_out/:"
+    echo "    PO_PLOTS=$ANA_LX/plotting/plots ./run_pO_fits.sh both all --asimov --disc met"
+    echo "    # then impacts + covariance plots (pulled by 'download'):"
+    echo "    ./run_pO_impacts.sh --fit all"
+    echo "    ./run_pO_impacts.sh --disc met --fit all" ;;
   download)
     echo "[sync_lxplus] download done. Next, locally -- ONE command runs the whole"
     echo "observables chain (charge asymmetry, F/B, sigma = r x sigma_gen, and the"
     echo "(sigma_W, sigma_Z) contour; + the mu-vs-e overlays when the flavfit trees"
     echo "exist) for that discriminant:"
     echo "    cd $ANA_LOCAL/analysis"
-    echo "    ./run_observables.sh leppt           # the nominal; or: leppt_mt40 | met | all"
+    echo "    ./run_observables.sh leppt_mt40      # the nominal; or: met | all"
     echo "Check in its output that the contour came from the scan, not the ellipse:"
     echo "    [profiled] using .../higgsCombine_contour_lab.MultiDimFit.mH*.root"
     echo "    [profiled] scan min vs covariance best fit: d(sigma_W) = +0.0000 nb" ;;

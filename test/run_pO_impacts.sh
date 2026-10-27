@@ -30,7 +30,7 @@
 #      propagation actually uses)
 #
 # Usage (impacts need cmsenv; --cov-only needs only root):
-#   ./run_pO_impacts.sh [--disc met|leppt|leppt_mt40|met_mt40] [--variant lab|fb|both]
+#   ./run_pO_impacts.sh [--disc leppt_mt40|met] [--variant lab|fb|both]
 #                       [--fit comb|mu|ele|all]       (default: comb = the grand fit)
 #                       [--pois "r_Wp_y3 r_Z ..."]    (default: ALL 25 POIs)
 #                       [--impacts-only | --cov-only] [--dry-run]
@@ -40,8 +40,8 @@
 # --fit all = comb + mu + ele in one go (= the fit driver's mode all); a list
 # ("mu,ele") picks several. A fit whose work dir does not exist (e.g. flavfit
 # never ran) is skipped with a note, so `all` also works on a grand-fit-only tree.
-# QCD_MODE=abcdy in the env (2026-10-19) -> the tree pO_fit_out<suffix>_abcdy/,
-# where run_pO_fits.sh puts that mode's fits.
+# (2026-10-19..26 QCD_MODE=abcdy in the env pointed at pO_fit_out<suffix>_abcdy/;
+# since 2026-10-26 abcdy is the leppt_mt40 model and lives in pO_fit_out_leppt_mt40/.)
 # Outputs:  pO_fit_out<suffix>/<fit dir>/impacts/   (json + per-POI PDFs)
 #           pO_fit_out<suffix>/<fit dir>/cov/       (correlation-matrix png+pdf)
 # Both directories are pulled back to the Mac by  ./sync_lxplus.sh download.
@@ -52,7 +52,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MYS="$HERE/my_script"
 
-DISC="leppt"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0; FIT="comb"   # leppt = the nominal since 2026-10-21
+DISC="leppt_mt40"; VARIANTS="lab fb"; POIS="all"; DO_IMP=1; DO_COV=1; DRY=0; FIT="comb"   # leppt_mt40 | met (2026-10-26)
 while [ $# -gt 0 ]; do
   case "$1" in
     --disc)    shift; DISC="${1:-}";;
@@ -76,15 +76,9 @@ done
 
 case "$DISC" in
   met)        SFX="";;
-  leppt)      SFX="_leppt";;
   leppt_mt40) SFX="_leppt_mt40";;
-  met_mt40)   SFX="_met_mt40";;   # 2026-10-20: PF MET of the leppt_mt40 events
-  *) echo "[ERROR] unknown --disc '$DISC' (met|leppt|leppt_mt40|met_mt40)"; exit 1;;
+  *) echo "[ERROR] unknown --disc '$DISC' (leppt_mt40|met; leppt and met_mt40 were removed 2026-10-26)"; exit 1;;
 esac
-# QCD_MODE=abcdy (2026-10-19): that fit lives in its own tree
-# pO_fit_out<suffix>_abcdy/ (run_pO_fits.sh's default for the mode) -- so the
-# same env var that built it points the impacts at it
-if [ "${QCD_MODE:-}" = "abcdy" ]; then SFX="${SFX}_abcdy"; echo "[run_pO_impacts] QCD_MODE=abcdy -> pO_fit_out${SFX}/"; fi
 # the fit(s): all = the grand fit + both per-flavour fits; a comma- or
 # space-separated list picks several (validated up front, before any work)
 case "$FIT" in

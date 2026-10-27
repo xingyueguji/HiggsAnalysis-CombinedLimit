@@ -49,27 +49,21 @@
 #   Mode 'simfit' (2026-08-04, the DEFAULT) = the GRAND SIMULTANEOUS FIT: all 48 (flavour,
 #   charge, y-bin) W channels + BOTH Z peaks in ONE likelihood per binning
 #   variant (lab, fb).  25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z
-#   scaling all DY-related MC; global lumi lnN on all MC.  QCD: the DEFAULT is
-#   DISC-DEPENDENT since 2026-09-15b -- QCD_MODE=abcd (the IN-FIT ABCD) for the
-#   primary --disc leppt_mt40, QCD_MODE=lnN (log-normal-constrained at the ABCD
-#   prediction per flavour+charge) for met/leppt, where the qcd_abcd template
-#   and the CR dirs do not exist.  Env QCD_MODE/QCD_LNN_MU/QCD_LNN_ELE/LUMI_LNN
-#   -> make_pO_simfit_cards.sh and an explicit QCD_MODE always wins
-#   (QCD_MODE=lnN on leppt_mt40 = the like-for-like comparison; QCD_MODE=free
-#   restores the 48 free qcd_norm rateParams).  QCD_MODE=abcd
-#   (2026-08-23, --disc leppt_mt40 ONLY) = the IN-FIT ABCD: 12 counting CR
-#   channels + free scales qcd_s{B,C,D}_<F>_<C> + the formula rateParam
-#   (sB*sC/sD) on the SR qcd_abcd template, so the QCD normalization floats
-#   with the CR data and the EWK subtraction rides the POIs; env
-#   QCD_ABCD_LNN_MU/QCD_ABCD_LNN_ELE = the reduced residual kappas,
-#   QCD_WCR=float|frozen picks the CRB W treatment).  QCD_MODE=abcdy
-#   (2026-10-19, OPT-IN, leppt_mt40 ONLY) = the in-fit ABCD PER RAPIDITY GROUP
+#   scaling all DY-related MC; global lumi lnN on all MC.  QCD: ONE model per
+#   discriminant (2026-10-26, user decision), chosen by make_pO_simfit_cards.sh:
+#   --disc leppt_mt40 -> QCD_MODE=abcdy = the IN-FIT ABCD PER RAPIDITY GROUP
 #   (fwd y10-11 | bwd y0-1 | cen y2-9, from the inputs' group sidecar
-#   combine_input_W_leppt_mt40_abcdy.txt): each group has its own CRs, scales
-#   and formula on the SR qcd_abcdy template; the out-tree defaults to
-#   pO_fit_out_leppt_mt40_abcdy/ so the nominal abcd fit is never
-#   overwritten (an explicit --out wins); w/wtau under the Z
-#   peaks frozen at absolute MC.  LHE shape systematics (2026-09-07):
+#   combine_input_W_leppt_mt40_abcdy.txt): per (flavour, charge, group) three
+#   counting CR channels + free scales qcd_s{B,C,D}_<F>_<C>_<g> + the formula
+#   rateParam (sB*sC/sD) on the SR qcd_abcdy template, so the QCD
+#   normalization floats with the CR data and the EWK subtraction rides the
+#   POIs (env QCD_ABCD_LNN_MU/QCD_ABCD_LNN_ELE = the reduced residual kappas,
+#   QCD_WCR=float|frozen picks the CRB W treatment); --disc met ->
+#   QCD_MODE=lnN (log-normal-constrained at the ABCD prediction per
+#   flavour+charge; env QCD_LNN_MU/QCD_LNN_ELE) or QCD_MODE=free (48 free
+#   qcd_norm rateParams). (Removed 2026-10-26: QCD_MODE=abcd, the y-inclusive
+#   in-fit ABCD, and QCD_MODE=mtsplit with --disc leppt; --disc met_mt40.)
+#   w/wtau under the Z peaks frozen at absolute MC.  LHE shape systematics (2026-09-07):
 #   nPDF / qcdScale / alphaS `shape` rows from the <proc>_<syst>Up/Down
 #   templates the inputs carry (env LHE_SYST=auto|off|list -> the card
 #   generator; the inputs' *_systs.txt sidecars travel with the copies).
@@ -78,40 +72,19 @@
 #   single-flavour fit is mode 'flavfit').
 #   Outputs under <out>/simfit/ (comb_* files; yields are mu+e combined).
 #   options:
-#     --disc met|leppt|leppt_mt40|met_mt40
-#                       W discriminant (default leppt = THE NOMINAL since
-#                       2026-10-21; leppt_mt40 until then -- the code default
-#                       is DISC above).
-#                       met        = PF MET shape (the backup variant)
-#                       leppt      = lepton pT with NO m_T cut (2026-10-21, user
-#                                    decision: the nominal, because of the
-#                                    electron PF-MET issue): the SR split at
-#                                    m_T = 30 into two channels per bin sharing r
-#                                    and the scheme-C multijet, QCD_MODE=mtsplit
-#                                    (its only, and default, mode): free level
-#                                    qcd_sT per (flavour, charge, rapidity BIN;
-#                                    per group until 2026-10-21b) x the bin's
-#                                    anti-iso anchors qcd_sD/qcd_sH (1-bin
-#                                    CRD/CRH per bin), the m_T < 30 channel =
-#                                    region B, the pT shape per group; residual
-#                                    lnN on the m_T >= 30 multijet from the
-#                                    input's _mtsplit.txt sidecar: the anti-iso
-#                                    window (kappaWin, coherent per charge) +
-#                                    the m_T transfer (kappaXfer, measured on all
-#                                    bins, one nuisance per group; env
-#                                    QCD_MTSPLIT_WIN/XFER_MU/ELE override); gen
-#                                    fiducial without m_T (gen_xsec_fid.txt)
-#                       leppt_mt40 = lepton pT with the pT>25 && m_T>40 selection
-#                       met_mt40   = PF MET with the SAME pT>25 && m_T>40
-#                                    selection (2026-10-20): the apples-to-apples
-#                                    MET counterpart of leppt_mt40 -- same events,
-#                                    same in-fit ABCD CRs and groups, same m_T>40
-#                                    gen fiducial; QCD_MODE abcd/abcdy allowed
-#                       Reads combine_input_W[_leppt[_mt40]|_met_mt40].root and writes to
-#                       pO_fit_out[_leppt[_mt40]|_met_mt40]/ (unless --out). Z channel and
-#                       fit model identical.  NB the pT variants lack the
-#                       low-MET QCD anchor, which is exactly why the QCD lnN
-#                       (vs the old free qcd_norm) matters most for them.
+#     --disc leppt_mt40|met
+#                       W discriminant (default leppt_mt40; the two fits since
+#                       2026-10-26, user decision):
+#                       leppt_mt40 = lepton pT with the pT>25 && m_T>40 selection,
+#                                    QCD_MODE=abcdy, gen fiducial with m_T > 40
+#                                    (gen_xsec_fid_mt40.txt)
+#                       met        = PF MET shape without an m_T cut,
+#                                    QCD_MODE=lnN|free, gen fiducial without
+#                                    m_T (gen_xsec_fid.txt)
+#                       Reads combine_input_W[_leppt_mt40].root and writes to
+#                       pO_fit_out[_leppt_mt40]/ (unless --out). Z channel and
+#                       the rest of the model identical. (leppt -- no m_T cut,
+#                       QCD_MODE=mtsplit -- and met_mt40 were removed 2026-10-26.)
 #     --dry-run         build datacards + check inputs only (no cmsenv needed)
 #     --no-postfit      skip the postfit plots (faster)
 #     --draw-only       redraw postfit plots from EXISTING fits (no combine run;
@@ -160,7 +133,7 @@ MYS="$HERE/my_script"
 # Turn them off with --no-statonly / --no-contour.
 CHAN_ARG="both"; MODE="simfit"; DRYRUN=0; DO_POSTFIT=1; DRAWONLY=0; ASIMOV=0; STATONLY=1; EXTRACTONLY=0
 CONTOUR=1; CONTOUR_POINTS="${CONTOUR_POINTS:-2500}"
-DISC="leppt"; OUT_SET=0   # the nominal since 2026-10-21: the no-m_T lepton-pT fit (QCD_MODE=mtsplit)
+DISC="leppt_mt40"; OUT_SET=0   # leppt_mt40 (QCD_MODE=abcdy) | met (2026-10-26: the two fits)
 OUTROOT="$HERE/pO_fit_out"
 PO_PLOTS="${PO_PLOTS:-}"
 PO_PLOTS_DEFAULTS="/Users/zhenghuang/pO_analysis/plotting/plots /afs/cern.ch/user/z/zheng/pO_analysis/plotting/plots"
@@ -183,7 +156,7 @@ while [ $# -gt 0 ]; do
     --contour)                 CONTOUR=1 ;;    # (the default since 2026-09-15b; kept as a no-op)
     --no-contour)              CONTOUR=0 ;;    # skip the (sigmaW, r_Z) profiled 2D scan
     --plots-dir)               shift; PO_PLOTS="${1:-}" ;;
-    --disc)                    shift; DISC="${1:?--disc needs a value: met|leppt|leppt_mt40|met_mt40}" ;;
+    --disc)                    shift; DISC="${1:?--disc needs a value: leppt_mt40|met}" ;;
     --out)                     shift; OUTROOT="${1:?--out needs a directory}"; OUT_SET=1 ;;
     -h|--help)                 sed -n '3,/bash-3.2 safe/p' "$0"; exit 0 ;;
     *) echo "[ERROR] unknown arg: $1"; exit 1 ;;
@@ -194,22 +167,15 @@ done
 # ---- resolve the discriminant variant ---------------------------------------
 case "$DISC" in
   met)        DSUF="";            XT="PF MET (GeV)"        ;;
-  leppt)      DSUF="_leppt";      XT="Lepton p_{T} (GeV)"  ;;
   leppt_mt40) DSUF="_leppt_mt40"; XT="Lepton p_{T} (GeV)"  ;;
-  met_mt40)   DSUF="_met_mt40";   XT="PF MET (GeV)"        ;;  # 2026-10-20: MET of the leppt_mt40 events
-  *) echo "[ERROR] --disc must be met|leppt|leppt_mt40|met_mt40 (got '$DISC')"; exit 1 ;;
+  *) echo "[ERROR] --disc must be leppt_mt40|met (got '$DISC'; leppt and met_mt40 were removed 2026-10-26)"; exit 1 ;;
 esac
 YT="Events / 2.0 GeV"   # MET and lepton-pT templates are both 2 GeV bins
 WINNAME="combine_input_W${DSUF}.root"
-# unsuffixed out-tree for met (its historical name); suffixed tree for the variants (unless --out given)
+# unsuffixed out-tree for met (its historical name); suffixed tree for leppt_mt40 (unless --out given).
+# (2026-10-19..26 QCD_MODE=abcdy wrote to its own pO_fit_out_leppt_mt40_abcdy/; it is the
+#  leppt_mt40 model now and writes to pO_fit_out_leppt_mt40/.)
 if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
-# QCD_MODE=abcdy (2026-10-19, the rapidity-resolved in-fit ABCD) gets its OWN
-# default out-tree, so it can never overwrite the nominal (abcd) fit of the
-# same discriminant; an explicit --out still wins
-if [ "$OUT_SET" -eq 0 ] && [ "${QCD_MODE:-}" = "abcdy" ]; then
-  OUTROOT="${OUTROOT}_abcdy"
-  echo "[run_pO_fits] QCD_MODE=abcdy -> out-tree $OUTROOT"
-fi
 
 # ---- locate the analysis plots dir (not needed for --draw-only: it reuses ---
 # ---- the combine_input_*.root copies already in the work dir; for ----------
@@ -415,7 +381,7 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
   # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
   # -> none); the extractor reports their pulls + closure.
   # Also called by --extract-only (2026-09-15) on an existing fits/ tree.
-  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; QGRP=""; MTSK=""; KF="$SDCD/qcd_lnn_kappas.txt"
+  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; QGRP=""; KF="$SDCD/qcd_lnn_kappas.txt"
   if [ -f "$KF" ]; then
     KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
     KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
@@ -426,8 +392,6 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     # qcdGroups (abcdy only, 2026-10-19): the rapidity groups of the cards ->
     # the extractor's per-group scales / multipliers; "" in every other mode
     QGRP=$(awk '$1=="qcdGroups"{print $2}' "$KF"); QGRP="${QGRP:-}"
-    # mtsplitKappas (mtsplit only, 2026-10-21b): every residual kappa of the cards
-    MTSK=$(awk '$1=="mtsplitKappas"{print $2}' "$KF"); MTSK="${MTSK:-}"
     # flavours (2026-09-22): the cards must be the ones of THIS tree (a sidecar
     # without the line predates per-flavour fits = the grand mu,ele card)
     KFL=$(awk '$1=="flavours"{print $2}' "$KF"); KFL="${KFL:-mu,ele}"
@@ -447,7 +411,7 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     # produces numbers anyone quotes, it gets a log.)
     # (log named after the work dir: extract_simfit.log for the grand fit, as
     #  before; extract_simfit_<flav>.log for the per-flavour ones)
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\",\"$QGRP\",\"${MTSK:-}\")" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\",\"$QGRP\")" 2>&1 \
       | tee "$SSUMM/extract_${SNAME}.log" \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
     echo "[extract] full log: $SSUMM/extract_${SNAME}.log"
@@ -458,34 +422,26 @@ simfit_postfit_all() {  # postfit data/MC per channel of the fit ($SFLAVS), both
   # QCD info-box param: lnN mode (2026-08-17 default) -> the shared per
   # (flavour, charge) nuisance qcd_rate_<F>_<C>, whose displayed value is the
   # PULL theta (scale = kappa^theta); free mode -> the per-channel qcd_norm.
-  QLNN=0; PQMODE=""
+  QLNN=0
   if [ -f "$SDCD/qcd_lnn_kappas.txt" ]; then
     KQTEST=$(awk '$1=="kQcdMu"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
     [ -n "$KQTEST" ] && [ "$KQTEST" != "0" ] && QLNN=1
-    PQMODE=$(awk '$1=="qcdMode"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
   fi
-  # mtsplit (2026-10-21): two channels per bin (_lo = m_T < 30, _hi), the QCD
-  # info-box parameter = the bin's level qcd_sT_<F>_<C>_y<i> (per group until 2026-10-21b)
-  PPARTS="-"; [ "$PQMODE" = "mtsplit" ] && PPARTS="lo hi"
   for B in lab fb; do
     fd="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
     [ -f "$fd" ] || continue
     for F in $SFLAVS; do
       if [ "$F" = "ele" ]; then AW="$AWEL"; AZ="$AZEL"; WL="W #rightarrow e #nu"; ZL="Z #rightarrow e e"
       else                      AW="$AWMU"; AZ="$AZMU"; WL="W #rightarrow #mu #nu"; ZL="Z #rightarrow #mu #mu"; fi
-      GSC="${AW%.root}_mtsplit.txt"
       for C in Wp Wm; do
         for iy in $(seq 0 11); do
-         for P in $PPARTS; do
-          if [ "$P" = "-" ]; then R="${C}_${B}_y${iy}"; else R="${C}_${B}_y${iy}_${P}"; fi
+          R="${C}_${B}_y${iy}"
           CH="${F}_${R}"
           QN="qcd_norm_${CH}"; [ "$QLNN" -eq 1 ] && QN="qcd_rate_${F}_${C}"
-          [ "$P" != "-" ] && QN="qcd_sT_${F}_${C}_y${iy}"
           # info box: this bin's POI, the global r_Z (shown as DY norm), the QCD
-          # param (lnN mode: the shared nuisance -> value shown is the PULL);
-          # ndf uses the ~3 params that shape this channel.
+          # param (lnN/abcdy mode: the shared residual nuisance -> value shown is
+          # the PULL); ndf uses the ~3 params that shape this channel.
           root -b -q "$MYS/draw_postfit_pO.C(\"$fd\",\"$CH\",\"$AW\",\"$R\",\"$SPOST/$CH\",\"$XT\",\"$YT\",\"$WL\",\"$CH (${SNAME} postfit)\",true,\"r_${C}_y${iy}\",\"r_Z\",\"$QN\",3)" >/dev/null 2>&1
-         done
         done
       done
       # the Z peak as seen by this variant's grand fit (r_Z only; W bkg frozen)
@@ -587,14 +543,13 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
   if [ "$CONTOUR" -eq 1 ]; then
     export SIGMA_POI=1
     # the gen fiducial SET of the discriminant (2026-10-13; = pODisc::GenFid in
-    # the analysis repo): leppt_mt40 (and since 2026-10-20 met_mt40, the same
-    # selection) is measured in the m_T > 40 fiducial volume
-    # (gen_xsec_fid_mt40.txt), met in the one without (gen_xsec_fid.txt).
+    # the analysis repo): leppt_mt40 is measured in the m_T > 40 fiducial
+    # volume (gen_xsec_fid_mt40.txt), met in the one without (gen_xsec_fid.txt).
     # The analysis-side contour reads the same set, and its staleness gate
     # rejects a scan baked with the other one.
     case "$DISC" in
-      leppt_mt40|met_mt40) GEN_FID_TAG="_mt40" ;;
-      *)                   GEN_FID_TAG="" ;;
+      leppt_mt40) GEN_FID_TAG="_mt40" ;;
+      *)          GEN_FID_TAG="" ;;
     esac
     export GEN_XSEC_FID="${GEN_XSEC_FID:-$PO_PLOTS/../../skim/output/gen_xsec_fid${GEN_FID_TAG}.txt}"
     if [ ! -f "$GEN_XSEC_FID" ]; then
@@ -624,14 +579,12 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
     else rm -f "${pdst%.root}_systs.txt"; fi
     if [ -f "${psrc%.root}_abcdy.txt" ]; then cp -f "${psrc%.root}_abcdy.txt" "${pdst%.root}_abcdy.txt"
     else rm -f "${pdst%.root}_abcdy.txt"; fi
-    # + the mtsplit group sidecar of the no-m_T input (2026-10-21; groups + the measured kappaWin/kappaXfer)
-    if [ -f "${psrc%.root}_mtsplit.txt" ]; then cp -f "${psrc%.root}_mtsplit.txt" "${pdst%.root}_mtsplit.txt"
-    else rm -f "${pdst%.root}_mtsplit.txt"; fi
+    rm -f "${pdst%.root}_mtsplit.txt"   # (the removed no-m_T fit's sidecar; never stale-copied)
     cp -f "$psrc" "$pdst"
   done
 
   # absolute-path datacards so combine resolves shapes from any CWD.
-  # The generator can refuse (e.g. QCD_MODE=abcd with a non-leppt_mt40 disc);
+  # The generator can refuse (e.g. a QCD_MODE that does not belong to the disc);
   # the script runs without -e, so check explicitly or the fit stage would run
   # on stale/absent cards. SIMFIT_FLAVS restricts the card to this fit's
   # flavours (the grand card is byte-identical to the pre-2026-09-22 one).

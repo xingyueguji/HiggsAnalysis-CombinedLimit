@@ -35,17 +35,23 @@ cmsenv
 # DEFAULT (2026-08-04) = simfit, the GRAND SIMULTANEOUS FIT: one likelihood per
 # binning variant (lab, fb) with all 48 W channels ({mu,ele} x {Wp,Wm} x y0..11)
 # + BOTH Z peaks. 25 POIs: r_<C>_y<i> (24, mu/e SHARED) + one global r_Z on all
-# DY-related MC; w/wtau under Z frozen at MC. QCD via QCD_MODE:
-#   lnN (default, 2026-08-17): qcd_rate_{mu,ele}_{Wp,Wm} lnN at the ABCD
-#     prediction (kappa mu 1.15 / ele 1.20; QCD_LNN_MU/QCD_LNN_ELE);
-#   free: the pre-2026-08-17 48 per-channel qcd_norm rateParams;
-#   abcd (2026-08-23, --disc leppt_mt40 ONLY): the IN-FIT ABCD -- 12 counting
-#     CR channels + free scales qcd_s{B,C,D}_<F>_<C> + the formula rateParam
-#     (sB*sC/sD) on the SR qcd_abcd template; EWK subtraction rides the POIs
-#     (CRB DY -> r_Z, CRB W -> per-y w_y* mapped to the r's; QCD_WCR=frozen
-#     freezes it); reduced residual kappas QCD_ABCD_LNN_MU=1.09/ELE=1.15.
+# DY-related MC; w/wtau under Z frozen at MC. QCD via QCD_MODE (since
+# 2026-10-26 one model per discriminant):
+#   abcdy (--disc leppt_mt40, the default and the ONLY mode there): the IN-FIT
+#     ABCD per rapidity GROUP (fwd y10-11 | bwd y0-1 | cen y2-9, from the
+#     inputs' group sidecar combine_input_W_leppt_mt40_abcdy.txt) -- 36 counting
+#     CR channels <F>_<C>_<g>_CR{B,C,D} + free scales qcd_s{B,C,D}_<F>_<C>_<g> +
+#     one formula rateParam qcd_abcd_<F>_<C>_<g> = (sB*sC/sD) per group on the SR
+#     qcd_abcdy template; EWK subtraction rides the POIs (CRB DY -> r_Z, CRB W ->
+#     per-y w_y* mapped to the r's; QCD_WCR=frozen freezes it); residual lnN
+#     qcd_rate_<F>_<C> shared by the groups, QCD_ABCD_LNN_MU=1.09/ELE=1.05.
+#   lnN (--disc met, the default there): qcd_rate_{mu,ele}_{Wp,Wm} lnN at the
+#     ABCD prediction (kappa mu 1.15 / ele 1.20; QCD_LNN_MU/QCD_LNN_ELE);
+#   free (--disc met only): the 48 per-channel qcd_norm rateParams.
+#   (The y-inclusive abcd mode and the no-m_T mtsplit mode were removed
+#   2026-10-26, with the leppt and met_mt40 discriminants.)
 # --asimov adds a prefit-Asimov closure fit (all POIs must return 1 -- and in
-# abcd mode the 12 CR scales too, and every shape nuisance at 0; the extraction
+# abcdy mode the 36 CR scales too, and every shape nuisance at 0; the extraction
 # prints PASS/FAIL). Outputs: pO_fit_out<suffix>/simfit/summary/
 # {comb_W_yields.csv, comb_summary.csv, comb_fitted_yields.root(+h_cov_yield[_FB])}.
 # LHE shape systematics (2026-09-07): the inputs carry <proc>_{nPDF,qcdScale,
@@ -69,21 +75,19 @@ cmsenv
 # col), simfit_<B>_stat summary rows, h_cov_yield[_FB]_stat; --statonly adds
 # the frozen-nuisance refit as a cross-check (simfit_<B>_statonlyfit rows);
 # --extract-only re-runs just the extraction on an existing fits/ tree.
-./run_pO_fits.sh --asimov
+./run_pO_fits.sh --asimov                                               # grand fit, leppt_mt40 abcdy
 ./run_pO_fits.sh both flavfit --asimov                                  # mu-only + e-only fits
 ./run_pO_fits.sh both all --asimov                                      # grand + mu-only + e-only
-QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40 --asimov   # in-fit ABCD
-LHE_SYST=off ./run_pO_fits.sh both simfit --disc leppt_mt40             # no theory shape nuisances
-SF_TRIG_CORR=perbin QCD_MODE=abcd ./run_pO_fits.sh both simfit --disc leppt_mt40   # robustness: muTrig decorrelated per y bin
-QCD_MODE=abcdy ./run_pO_fits.sh both all --asimov                       # OPT-IN: in-fit ABCD per rapidity group -> pO_fit_out_leppt_mt40_abcdy/
-QCD_MODE=abcdy ./run_pO_impacts.sh --fit all                            # (its impacts, same tree)
+LHE_SYST=off ./run_pO_fits.sh both simfit                               # no theory shape nuisances
+SF_TRIG_CORR=perbin ./run_pO_fits.sh both simfit                        # robustness: muTrig decorrelated per y bin
+./run_pO_impacts.sh --fit all                                           # impacts of the three fits
 
-# W discriminant variants (2026-07-30): --disc met|leppt|leppt_mt40 (default leppt_mt40 since 2026-08-16).
-# leppt / leppt_mt40 read combine_input_W_leppt[_mt40].root and write to
-# pO_fit_out_leppt[_mt40]/; the Z channel is unchanged. For the pT variants the
-# discriminant lacks the low-MET in-fit QCD anchor, which is exactly what
-# QCD_MODE=abcd restores for leppt_mt40 (explicit CR channels).
-./run_pO_fits.sh both all --disc leppt_mt40
+# W discriminants (since 2026-10-26 exactly two): --disc leppt_mt40 (default) |
+# met. leppt_mt40 reads combine_input_W_leppt_mt40.root and writes to
+# pO_fit_out_leppt_mt40/; met reads combine_input_W.root and writes to
+# pO_fit_out/; the Z channel is the same for both.
+./run_pO_fits.sh both all --asimov --disc met
+./run_pO_impacts.sh --disc met --fit all
 
 # *** WARNING: carry the SAME --disc through the WHOLE workflow of a variant ***
 # The out-trees have no discriminant marker (the coupling is only the dir
@@ -91,7 +95,7 @@ QCD_MODE=abcdy ./run_pO_impacts.sh --fit all                            # (its i
 #   - --draw-only MUST repeat the same --disc (it picks the out-tree AND the
 #     x-title; forget it and lepton-pT plots get relabeled "PF MET (GeV)").
 #     Same rule whenever --out is used.
-#   - sync_lxplus.sh download needs NO flag (sweeps all three out-trees).
+#   - sync_lxplus.sh download needs NO flag (sweeps both out-trees).
 #   - observables: run the analysis repo's analysis/run_observables.sh <disc>
 #     (2026-08-03) -- it feeds the MATCHING tree automatically and writes
 #     disc-tagged files + per-disc plot folders. (By hand, remember the histos
@@ -125,7 +129,7 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
 ## Pieces (all under `test/`)
 - `run_pO_fits.sh` — master driver (modes `simfit`, `flavfit`, `all`).
 - `my_script/make_pO_simfit_cards.sh` — writes the two grand-fit datacards
-  (`datacard_simfit_{lab,fb}.txt`, 50 channels / 62 in abcd mode) + the
+  (`datacard_simfit_{lab,fb}.txt`, 50 channels for met / 86 for leppt_mt40 abcdy) + the
   multiSignalModel map files (`t2w_maps_simfit_{lab,fb}.txt` — THE definition of
   the 25-POI model; `_sigma` twins for the contour). `SIMFIT_FLAVS=mu|ele`
   (set by `flavfit`) writes the per-flavour card instead: that flavour's
@@ -159,18 +163,18 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
 - **`r_Z`**: one global scale on ALL DY-related MC (`z`/`ztau` in every W
   channel + `zsig`/`ztau` under both Z peaks). DY rapidity dependence across W
   bins is fixed from MC; the Z peaks pin the normalization.
-- QCD (`QCD_MODE`): **lnN** (default) — `qcd_rate_{mu,ele}_{Wp,Wm}` lnN at the
-  ABCD prediction; **free** — `qcd_norm_<channel>` per W channel (48);
-  **abcd** (leppt_mt40 only) — in-fit ABCD: CR channels `<F>_<C>_CR{B,C,D}`,
-  free scales `qcd_s{B,C,D}_<F>_<C>`, formula rateParam `(@0*@1/@2)` on the SR
-  `qcd_abcd` template, reduced residual lnN; **abcdy** (2026-10-19, OPT-IN,
-  leppt_mt40 only) — the same per rapidity GROUP from the inputs' group
-  sidecar `combine_input_W_leppt_mt40_abcdy.txt` (fwd y10-11 | bwd y0-1 |
-  cen y2-9): CR channels `<F>_<C>_<g>_CR{B,C,D}`, scales
-  `qcd_s{B,C,D}_<F>_<C>_<g>`, one formula `qcd_abcd_<F>_<C>_<g>` per group on
-  the SR `qcd_abcdy` template, the residual lnN shared by the groups; own
-  out-tree `pO_fit_out_leppt_mt40_abcdy/`. `w`/`wtau` under the Z peaks:
-  frozen at absolute MC (0.03–0.06 events — negligible by measurement).
+- QCD (`QCD_MODE`, one model per discriminant since 2026-10-26):
+  **abcdy** (leppt_mt40, the only mode there) — the in-fit ABCD per rapidity
+  GROUP from the inputs' group sidecar `combine_input_W_leppt_mt40_abcdy.txt`
+  (fwd y10-11 | bwd y0-1 | cen y2-9): CR channels `<F>_<C>_<g>_CR{B,C,D}`,
+  free scales `qcd_s{B,C,D}_<F>_<C>_<g>`, one formula rateParam
+  `qcd_abcd_<F>_<C>_<g>` = `(@0*@1/@2)` per group on the SR `qcd_abcdy`
+  template, the residual lnN `qcd_rate_<F>_<C>` shared by the groups;
+  **lnN** (met, default there) — `qcd_rate_{mu,ele}_{Wp,Wm}` lnN at the ABCD
+  prediction; **free** (met only) — `qcd_norm_<channel>` per W channel (48).
+  The y-inclusive `abcd` and the no-m_T `mtsplit` modes were removed on
+  2026-10-26. `w`/`wtau` under the Z peaks: frozen at absolute MC
+  (0.03–0.06 events — negligible by measurement).
 - ttbar (2026-10-16): its own column `ttbar` (process id 20) in every W
   channel, both Z peaks and CRB (inside the frozen `ewk` in CRC/CRD); no map
   matches it, so it stays at absolute MC with `lumi` and its own
@@ -206,7 +210,7 @@ contour/contour_<B>,postfit,summary}` with `<fit>` = `simfit` (grand),
 
 ## Fit model — flavfit (2026-09-22, the per-flavour fits)
 - The simfit model above with ONE lepton flavour per likelihood: that
-  flavour's 24 W channels + its Z peak (+ its 6 CR channels in abcd mode).
+  flavour's 24 W channels + its Z peak (+ its 18 group CR channels in abcdy mode).
 - Still 25 POIs: `r_<C>_y<i>` now measured by that flavour alone, and its own
   `r_Z` from its own Z peak (so the μ-only and e-only r's are independent
   measurements; the grand fit forces one shared r).
@@ -228,7 +232,7 @@ Each postfit plot (`draw_postfit_pO.C`) now prints, in the top-right info box:
   χ²/ndf ≈ 1 and a non-tiny p mean good agreement.
 - `r = … ± …` — the fitted signal strength of that channel's bin (`r_<C>_y<i>`).
 - `DY norm` / `QCD` — the fitted `r_Z` and the channel's QCD parameter (in
-  lnN/abcd mode the shared `qcd_rate_<F>_<C>` pull).
+  lnN/abcdy mode the shared `qcd_rate_<F>_<C>` pull).
 - a **red** `status N, covQ M` only when the fit did **not** converge cleanly
   (want `status 0`, `covQ 3` = full accurate covariance) — absence of red = OK.
 
