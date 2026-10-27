@@ -766,7 +766,7 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         const RooRealVar *x = (const RooRealVar *)fp.at(i);
         const TString n = x->GetName();
         bool known = n.BeginsWith("r_") || n == "lumi" || n == "ttbar_xsec" || n.BeginsWith("qcd_rate_") ||
-                     n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm_");
+                     n.BeginsWith("qcd_s") || n.BeginsWith("qcd_norm_") || n.BeginsWith("qcd_xfer_");
         for (size_t il = 0; il < lheNames.size() && !known; ++il) known = (n == lheNames[il]);
         if (!known)
           std::cout << "[extract-simfit] WARN " << fitName << ": floating parameter " << n << " = "
