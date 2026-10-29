@@ -1430,3 +1430,144 @@ static void SaveDataMCRatio(TH1 *hData, TH1 *hMC,
 
     delete c;
 }
+
+// ---------------------------------------------------------
+// SF tables against one inclusive measurement (2026-10-28)
+// ---------------------------------------------------------
+// The SF plot sets of correction/ (egm_tnp_ele.C: reco + ID+iso,
+// trig_eff_mb.C: trigger + the muon POG ID x ISO): per-bin SFs, one series per
+// slice, each point drawn over its FULL bin (asymmetric x errors to the bin
+// edges, the marker shifted inside the bin so the series do not overlap),
+// against ONE inclusive measurement drawn as a band across the whole x range
+// (a plain line when its errors are 0), plus an optional reference line.
+// Bin edges at +-inf (the EGM tables) are clipped to the plot range; x ranges
+// in shadeX are hatched (e.g. the ECAL crack, a range outside the probes).
+struct SFBinSeries
+{
+    std::vector<double> lo, hi, val, errLo, errHi; // one entry per bin
+    std::string label;
+    int color = kBlack, marker = 20;
+    double markerSize = 1.3;
+};
+struct SFLevel
+{
+    double val = 0, errLo = 0, errHi = 0;
+    std::string label;
+    int color = kAzure + 2;
+    int lineStyle = 1;
+};
+
+static void SaveSFBinsVsInclusive(const std::vector<SFBinSeries> &series,
+                                  const SFLevel &incl, const SFLevel *ref,
+                                  const std::string &outPathNoExt,
+                                  const std::string &xTitle, const std::string &yTitle,
+                                  double xLo, double xHi, double yLo, double yHi,
+                                  const std::string &mainTitle, const std::string &sub1, const std::string &sub2,
+                                  const std::vector<std::pair<double, double>> &shadeX = {},
+                                  const std::string &shadeLabel = "",
+                                  PlotStyle ps = PlotStyle())
+{
+    gStyle->SetOptStat(0);
+    static int nSF = 0;
+    TCanvas *c = new TCanvas(Form("c_sfbins_%d", nSF), "", ps.w, ps.h);
+    ApplyCanvasStyle(c, ps);
+    TH1F *frame = new TH1F(Form("frame_sfbins_%d", nSF++), "", 100, xLo, xHi);
+    frame->SetDirectory(nullptr);
+    ApplyHistStyle(frame, ps, xTitle, yTitle);
+    frame->SetMinimum(yLo);
+    frame->SetMaximum(yHi);
+    frame->GetYaxis()->SetNdivisions(505);
+    frame->Draw("AXIS");
+
+    const double legX1 = ps.legX1 >= 0 ? ps.legX1 : 0.17, legX2 = ps.legX2 >= 0 ? ps.legX2 : 0.93;
+    const double legY1 = ps.legY1 >= 0 ? ps.legY1 : 0.14, legY2 = ps.legY2 >= 0 ? ps.legY2 : 0.34;
+    TLegend *leg = new TLegend(legX1, legY1, legX2, legY2);
+    leg->SetBorderSize(0);
+    leg->SetFillStyle(0);
+    leg->SetTextFont(ps.font);
+    leg->SetTextSize(ps.boxTextSize);
+    leg->SetNColumns(ps.legNColumns);
+    leg->SetMargin(0.18);
+
+    TBox *shadeProxy = nullptr;
+    for (const auto &r : shadeX)
+    {
+        const double a = std::max(r.first, xLo), b = std::min(r.second, xHi);
+        if (b <= a) continue;
+        TBox *s = new TBox(a, yLo, b, yHi);
+        s->SetFillColor(kGray + 1);
+        s->SetFillStyle(3004);
+        s->SetLineWidth(0);
+        s->Draw();
+        if (!shadeProxy) shadeProxy = s;
+    }
+
+    TBox *band = nullptr;
+    if (incl.errLo > 0 || incl.errHi > 0)
+    {
+        band = new TBox(xLo, incl.val - incl.errLo, xHi, incl.val + incl.errHi);
+        band->SetFillColorAlpha(incl.color, 0.25);
+        band->SetLineWidth(0);
+        band->Draw();
+    }
+    TLine *lIncl = new TLine(xLo, incl.val, xHi, incl.val);
+    lIncl->SetLineColor(incl.color);
+    lIncl->SetLineStyle(incl.lineStyle);
+    lIncl->SetLineWidth(3);
+    lIncl->Draw();
+    TLine *lRef = nullptr;
+    if (ref)
+    {
+        lRef = new TLine(xLo, ref->val, xHi, ref->val);
+        lRef->SetLineColor(ref->color);
+        lRef->SetLineStyle(ref->lineStyle);
+        lRef->SetLineWidth(3);
+        lRef->Draw();
+    }
+
+    // the legend: the inclusive band first, then the reference, then the series
+    if (band)
+    {
+        TBox *proxy = (TBox *)band->Clone();
+        proxy->SetLineColor(incl.color);
+        proxy->SetLineWidth(3);
+        leg->AddEntry(proxy, incl.label.c_str(), "fl");
+    }
+    else
+        leg->AddEntry(lIncl, incl.label.c_str(), "l");
+    if (lRef) leg->AddEntry(lRef, ref->label.c_str(), "l");
+
+    const int n = (int)series.size();
+    for (int i = 0; i < n; ++i)
+    {
+        const SFBinSeries &s = series[i];
+        TGraphAsymmErrors *g = new TGraphAsymmErrors();
+        int k = 0;
+        for (size_t j = 0; j < s.val.size(); ++j)
+        {
+            const double a = std::max(s.lo[j], xLo), b = std::min(s.hi[j], xHi);
+            if (b <= a) continue;
+            // the n series spread over the central 60% of the bin (one series: the centre)
+            const double x = a + (b - a) * (0.2 + 0.6 * (i + 0.5) / n);
+            g->SetPoint(k, x, s.val[j]);
+            g->SetPointError(k, x - a, b - x, s.errLo[j], s.errHi[j]);
+            ++k;
+        }
+        g->SetMarkerStyle(s.marker);
+        g->SetMarkerSize(s.markerSize);
+        g->SetMarkerColor(s.color);
+        g->SetLineColor(s.color);
+        g->SetLineWidth(2);
+        g->Draw("P SAME");
+        leg->AddEntry(g, s.label.c_str(), "lep");
+    }
+    if (shadeProxy && !shadeLabel.empty()) leg->AddEntry(shadeProxy, shadeLabel.c_str(), "f");
+    leg->Draw();
+
+    DrawHeader(ps, mainTitle, sub1, sub2);
+    CMS_lumi(c, 13, 10);
+    c->RedrawAxis();
+    c->SaveAs((outPathNoExt + ".png").c_str());
+    c->SaveAs((outPathNoExt + ".pdf").c_str());
+    delete c;
+}

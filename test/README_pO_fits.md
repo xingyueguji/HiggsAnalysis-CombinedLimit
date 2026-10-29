@@ -47,8 +47,9 @@ cmsenv
 #     qcd_rate_<F>_<C> shared by the groups, QCD_ABCD_LNN_MU=1.10/ELE=1.10
 #     (since 2026-10-26 from the Oct-22 qcd_abcd log; before 1.09/1.05).
 #   lnN (--disc met, the default there): qcd_rate_{mu,ele}_{Wp,Wm} lnN at the
-#     ABCD prediction (kappa mu 1.15 / ele 1.28 since 2026-10-26 = the Oct-22
-#     qcd_abcd budget without the transport row; QCD_LNN_MU/QCD_LNN_ELE);
+#     ABCD prediction (kappa mu 1.15 / ele 1.22 = the qcd_abcd budget without
+#     the transport row; ele 1.22 since 2026-10-28 (MVAIso WP90-only
+#     selection), 1.28 on 2026-10-26..28; QCD_LNN_MU/QCD_LNN_ELE);
 #   free (--disc met only): the 48 per-channel qcd_norm rateParams.
 #   (The y-inclusive abcd mode and the no-m_T mtsplit mode were removed
 #   2026-10-26, with the leppt and met_mt40 discriminants.)
