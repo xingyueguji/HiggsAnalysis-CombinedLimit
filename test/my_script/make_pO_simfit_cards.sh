@@ -58,11 +58,16 @@
 #   subtraction rides the POIs: CRB z/ztau are swept into r_Z by the catch-all
 #   map, the CRB W parts w_y<i> of a group map to r_<C>_y<i> (QCD_WCR=float,
 #   default; maps and sigma maps name the group channel) or one frozen wfix
-#   (QCD_WCR=frozen). The residual lnN qcd_rate_<F>_<C> stays one per
-#   (flavour, charge), shared by its groups, with the REDUCED kappas (window
-#   only for e, window (+) FF shift for mu -- stat is profiled in-fit; derived
-#   in correction/logs/qcd_abcd_*.log). The kappa sidecar gains a qcdGroups
-#   line (read back by run_pO_fits.sh for the extractor).
+#   (QCD_WCR=frozen). The residual lnN on the SR qcd is, since 2026-10-30
+#   (user decision, QCD_RATE_SPLIT=group, the default), ONE PER (flavour,
+#   charge, group), qcd_rate_<F>_<C>_<g>, with a kappa per (flavour, group)
+#   from correction/logs/qcd_abcd_*.log "PER-GROUP RESIDUAL lnN SIZING" (see
+#   the QCD_ABCD_LNN_<FLAV>_<GROUP> defaults); until then (and with
+#   QCD_RATE_SPLIT=charge) one qcd_rate_<F>_<C> per (flavour, charge), shared
+#   by the groups, with the REDUCED kappas QCD_ABCD_LNN_MU/ELE (window only for
+#   e, window (+) FF shift for mu -- stat is profiled in-fit). The kappa sidecar
+#   gains a qcdGroups line and, when split, a qcdRateGroups line (both read
+#   back by run_pO_fits.sh for the extractor).
 #   (Removed 2026-10-26: QCD_MODE=abcd = the same in-fit ABCD with ONE set of
 #   CRs per (flavour, charge), 2026-08-23..10-26; QCD_MODE=mtsplit = the no-m_T
 #   lepton-pT fit, disc leppt, 2026-10-21..26; disc met_mt40, 2026-10-20..26.)
@@ -215,6 +220,37 @@ QCD_LNN_ELE="${QCD_LNN_ELE:-1.22}"
 # -> 1.15).
 QCD_ABCD_LNN_MU="${QCD_ABCD_LNN_MU:-1.10}"
 QCD_ABCD_LNN_ELE="${QCD_ABCD_LNN_ELE:-1.10}"
+# abcdy residual lnN PER RAPIDITY GROUP (2026-10-30, user decision): one
+# qcd_rate_<F>_<C>_<g> per (flavour, charge, group) instead of one per
+# (flavour, charge) shared by the groups -- the groups' CR -> SR transfer is
+# allowed to fail independently (the e-only fit of 2026-10-28 needed the edges'
+# multijet x1.1-1.5 and the centre's x0.6-0.8 of the template, and the shared
+# row could only move them together). kappa per (flavour, group) from
+# correction/logs/qcd_abcd_<lep>.log "PER-GROUP RESIDUAL lnN SIZING" =
+# 1 + sqrt(window^2 + (the m_T 30-40 closure beyond its stat error)^2), max of
+# the two charges, rounded up; a group with no QCD_ABCD_LNN_<FLAV>_<GROUP>
+# falls back to QCD_ABCD_LNN_<FLAV>. QCD_RATE_SPLIT=charge restores the shared
+# rows (= the cards of the 2026-10-28 fit).
+QCD_RATE_SPLIT="${QCD_RATE_SPLIT:-group}"
+QCD_ABCD_LNN_MU_FWD="${QCD_ABCD_LNN_MU_FWD:-1.44}"    # window 18.7%, closure 1.77 +- 0.63 (mu-) -> 43% beyond stat
+QCD_ABCD_LNN_MU_BWD="${QCD_ABCD_LNN_MU_BWD:-1.08}"    # window 7.6%, closures within stat
+QCD_ABCD_LNN_MU_CEN="${QCD_ABCD_LNN_MU_CEN:-1.16}"    # window 14.3%, closure 0.77 +- 0.17 (mu-)
+QCD_ABCD_LNN_ELE_FWD="${QCD_ABCD_LNN_ELE_FWD:-1.25}"  # window 9.4%, closure 1.26 +- 0.13 (e-)
+QCD_ABCD_LNN_ELE_BWD="${QCD_ABCD_LNN_ELE_BWD:-1.29}"  # window 10.6%, closure 1.30 +- 0.14 (e-)
+QCD_ABCD_LNN_ELE_CEN="${QCD_ABCD_LNN_ELE_CEN:-1.19}"  # window 1.4%, closure 0.80 +- 0.08 (e+)
+case "$QCD_RATE_SPLIT" in
+  group|charge) ;;
+  *) echo "[make_pO_simfit_cards] ERROR QCD_RATE_SPLIT='$QCD_RATE_SPLIT' (group | charge)" >&2; exit 2 ;;
+esac
+qrate_kappa() {  # $1 = mu|ele, $2 = group -> the per-group kappa (fallback: the flavour's)
+  local FU GU v
+  FU=$(echo "$1" | tr '[:lower:]' '[:upper:]'); GU=$(echo "$2" | tr '[:lower:]' '[:upper:]')
+  eval "v=\${QCD_ABCD_LNN_${FU}_${GU}:-}"
+  if [ -z "$v" ]; then
+    if [ "$1" = "ele" ]; then v="$QCD_ABCD_LNN_ELE"; else v="$QCD_ABCD_LNN_MU"; fi
+  fi
+  echo "$v"
+}
 QCD_WCR="${QCD_WCR:-float}"        # abcdy-mode CRB W content: float (per-y w_y*
                                    #  mapped to the r POIs) | frozen (wfix at
                                    #  absolute MC; add ~2%/1% residual to kappa)
@@ -668,11 +704,55 @@ qcd_abcd_${F}_${C}${GS} rateParam ${F}_${C}_${B}_y${iy} qcd (@0*@1/@2) ${FARGS}"
     done
   fi
 
-  # ---- systematics block: lumi + ttbar_xsec always; the 4 QCD lnN rows only in lnN mode ----
+  # ---- abcdy with QCD_RATE_SPLIT=group (2026-10-30): the residual lnN rows per
+  # (flavour, charge, rapidity group), built from the FINAL column list (MB/MP),
+  # so the blocks above need no extra bookkeeping: entry kappa_g on the SR qcd
+  # column of every bin of the group, '-' on every other column (other bins,
+  # other charges/flavours, every CR qcd -- whose yields are measurements).
+  QGROWS=""; QRKTOK=""
+  if [ "$QCD_MODE" = "abcdy" ] && [ "$QCD_RATE_SPLIT" = "group" ]; then
+    read -r -a MBA <<< "$MB"; read -r -a MPA <<< "$MP"
+    for F in $FLAVS; do
+      for G in $(ygrp_names "$B"); do
+        QRKTOK="${QRKTOK:+$QRKTOK,}${F}_${G}=$(qrate_kappa "$F" "$G")"
+      done
+      for C in Wp Wm; do
+        for G in $(ygrp_names "$B"); do
+          K=$(qrate_kappa "$F" "$G")
+          GB=" $(ygrp_bins "$B" "$G") "
+          ROW="$(printf '%-24s%s' "qcd_rate_${F}_${C}_${G}" 'lnN')"
+          NHIT=0
+          j=1
+          while [ "$j" -lt "${#MBA[@]}" ]; do
+            E="-"
+            if [ "${MPA[$j]}" = "qcd" ]; then
+              case "${MBA[$j]}" in
+                "${F}_${C}_${B}_y"*)
+                  iy="${MBA[$j]##*_y}"
+                  case "$GB" in *" $iy "*) E="$K"; NHIT=$((NHIT+1)) ;; esac ;;
+              esac
+            fi
+            ROW="$ROW $E"
+            j=$((j+1))
+          done
+          if [ "$NHIT" -eq 0 ]; then
+            echo "[make_pO_simfit_cards] ERROR qcd_rate_${F}_${C}_${G} has no SR qcd column ($B card)" >&2
+            exit 2
+          fi
+          QGROWS="${QGROWS}
+${ROW}"
+        done
+      done
+    done
+  fi
+
+  # ---- systematics block: lumi + ttbar_xsec always; the QCD lnN rows unless free ----
   SYST="
 ${SLUMI}
 ${STTX}"
-  if [ "$QCD_MODE" != "free" ]; then
+  if [ -n "$QGROWS" ]; then
+    SYST="${SYST}${QGROWS}"
+  elif [ "$QCD_MODE" != "free" ]; then
     # only the rows of the flavours IN the card: in a per-flavour card the
     # other flavour's two rows would be all '-' (a nuisance touching nothing)
     if [ "$USE_MU" = 1 ]; then
@@ -963,10 +1043,18 @@ if [ "$QCD_MODE" = "abcdy" ]; then
   done
   echo "qcdGroups $QGTOK" >> "$OUTDIR/qcd_lnn_kappas.txt"
 fi
+# qcdRateGroups (abcdy + QCD_RATE_SPLIT=group, 2026-10-30): the per-group
+# residual kappas THESE cards carry, ONE token "<flav>_<group>=<kappa>,...";
+# run_pO_fits.sh passes it to the extractor (it then reads the per-group
+# qcd_rate_<F>_<C>_<g> pulls). Absent = one shared row per (flavour, charge).
+if [ -n "$QRKTOK" ]; then
+  echo "qcdRateGroups $QRKTOK" >> "$OUTDIR/qcd_lnn_kappas.txt"
+fi
 
 echo "[make_pO_simfit_cards] done -> ${OUTDIR} (flavours: ${FLAVS}; W discriminant: ${DISCLABEL})"
 KMSG=""
 if [ "$USE_MU" = 1 ];  then KMSG="mu ${KQM}"; fi
 if [ "$USE_ELE" = 1 ]; then KMSG="${KMSG:+$KMSG / }ele ${KQE}"; fi
+[ -n "$QRKTOK" ] && KMSG="residual lnN per rapidity group: ${QRKTOK}"
 echo "[make_pO_simfit_cards] QCD mode: ${QCD_MODE} (${KMSG}); lumi lnN ${LUMI_LNN}; ttbar_xsec lnN ${TTBAR_LNN}"
 echo "[make_pO_simfit_cards] shape systematics: theory [${THK:-none}] lepton SF [${SFALL:-none}] fake-factor QCD [${QFK:-none}] (LHE_SYST=${LHE_SYST}, SF_TRIG_CORR=${SF_TRIG_CORR} from ${SF_TRIG_SRC})"

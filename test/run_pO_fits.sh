@@ -4,8 +4,10 @@
 #
 # For each fit it:
 #   1. locates the structured Combine inputs from the analysis repo
-#        <plots>/combine_input_W<disc>.root , <plots>/combine_input_Z.root      (muon)
-#        <plots>/Elec/combine_input_{W<disc>,Z}.root                            (electron)
+#        <plots>/combine_inputs/muon/combine_input_{W<disc>,Z}.root             (muon)
+#        <plots>/combine_inputs/electron/combine_input_{W<disc>,Z}.root         (electron)
+#      (the analysis repo's plotting/plot_paths.h; until 2026-10-29 the muon
+#      inputs sat in <plots>/ and the electron ones in <plots>/Elec/)
 #      and copies them (+ their *_systs.txt sidecars) into the fit's work dir
 #   2. writes the datacard + multiSignalModel maps per binning variant (lab, fb)
 #      [my_script/make_pO_simfit_cards.sh]
@@ -183,7 +185,7 @@ if [ "$OUT_SET" -eq 0 ]; then OUTROOT="$HERE/pO_fit_out${DSUF}"; fi
 if [ "$DRAWONLY" -eq 0 ]; then
   if [ -z "$PO_PLOTS" ]; then
     for d in $PO_PLOTS_DEFAULTS; do
-      if [ -f "$d/$WINNAME" ]; then PO_PLOTS="$d"; break; fi
+      if [ -f "$d/combine_inputs/muon/$WINNAME" ]; then PO_PLOTS="$d"; break; fi
     done
   fi
   if [ -z "$PO_PLOTS" ] || [ ! -d "$PO_PLOTS" ]; then
@@ -192,13 +194,16 @@ if [ "$DRAWONLY" -eq 0 ]; then
       PO_PLOTS=""
     else
       echo "[ERROR] analysis plots dir not found. Set --plots-dir or \$PO_PLOTS to the"
-      echo "        dir containing $WINNAME (run plotting/mtandmet.C +"
-      echo "        dileptonpeak.C first)."
+      echo "        dir containing combine_inputs/muon/$WINNAME (run"
+      echo "        plotting/run_combine_inputs.sh first)."
       exit 2
     fi
   fi
   [ -n "$PO_PLOTS" ] && echo "[run_pO_fits] plots dir : $PO_PLOTS"
 fi
+# the Combine inputs of each flavour inside the plots dir
+PO_IN_MU="$PO_PLOTS/combine_inputs/muon"
+PO_IN_EL="$PO_PLOTS/combine_inputs/electron"
 echo "[run_pO_fits] channel(s): $CHAN_ARG    mode: $MODE    disc: $DISC    dry-run: $DRYRUN    draw-only: $DRAWONLY    extract-only: $EXTRACTONLY    asimov: $ASIMOV    statonly (stat source): $STATONLY    contour: $CONTOUR"
 
 # ---- cmsenv check -----------------------------------------------------------
@@ -381,7 +386,7 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
   # lheSysts (2026-09-07): the LHE shape nuisances in the cards ("none"/absent
   # -> none); the extractor reports their pulls + closure.
   # Also called by --extract-only (2026-09-15) on an existing fits/ tree.
-  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; QGRP=""; KF="$SDCD/qcd_lnn_kappas.txt"
+  KQM=0; KQE=0; KLU=0; QMODE=""; LHES=""; QGRP=""; QRK=""; KF="$SDCD/qcd_lnn_kappas.txt"
   if [ -f "$KF" ]; then
     KQM=$(awk '$1=="kQcdMu"{print $2}' "$KF");  KQM="${KQM:-0}"
     KQE=$(awk '$1=="kQcdEle"{print $2}' "$KF"); KQE="${KQE:-0}"
@@ -392,6 +397,9 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     # qcdGroups (abcdy only, 2026-10-19): the rapidity groups of the cards ->
     # the extractor's per-group scales / multipliers; "" in every other mode
     QGRP=$(awk '$1=="qcdGroups"{print $2}' "$KF"); QGRP="${QGRP:-}"
+    # qcdRateGroups (2026-10-30): the per-group residual-lnN kappas of the cards
+    # ("" = one shared qcd_rate_<F>_<C> per charge, every fit before that day)
+    QRK=$(awk '$1=="qcdRateGroups"{print $2}' "$KF"); QRK="${QRK:-}"
     # flavours (2026-09-22): the cards must be the ones of THIS tree (a sidecar
     # without the line predates per-flavour fits = the grand mu,ele card)
     KFL=$(awk '$1=="flavours"{print $2}' "$KF"); KFL="${KFL:-mu,ele}"
@@ -411,21 +419,31 @@ simfit_extract() {  # POIs + yields (summed over the fit's flavours) + covarianc
     # produces numbers anyone quotes, it gets a log.)
     # (log named after the work dir: extract_simfit.log for the grand fit, as
     #  before; extract_simfit_<flav>.log for the per-flavour ones)
-    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\",\"$QGRP\")" 2>&1 \
+    root -b -q "$MYS/extract_pO_simfit.C(\"$SFITS\",\"$AWMU\",\"$AWEL\",\"$SSUMM\",$KQM,$KQE,$KLU,\"$QMODE\",\"$LHES\",\"$SFLAVS_CSV\",\"$STAG\",\"$QGRP\",\"$QRK\")" 2>&1 \
       | tee "$SSUMM/extract_${SNAME}.log" \
       | grep -E "\[extract-simfit\]|\[asimov\]|WARN|FAIL" || true
     echo "[extract] full log: $SSUMM/extract_${SNAME}.log"
   fi
 }
 
+group_of_bin() {  # $1 = lab|fb, $2 = bin index, $3 = the sidecar's qcdGroups token -> group name
+  echo "$3" | tr ';' '\n' | awk -F: -v b="$1" -v i="$2" '$1 == b {
+    n = split($2, g, "/")
+    for (k = 1; k <= n; k++) { split(g[k], p, "="); m = split(p[2], x, ",")
+      for (j = 1; j <= m; j++) if (x[j] == i) { print p[1]; exit } } }'
+}
+
 simfit_postfit_all() {  # postfit data/MC per channel of the fit ($SFLAVS), both variants
   # QCD info-box param: lnN mode (2026-08-17 default) -> the shared per
   # (flavour, charge) nuisance qcd_rate_<F>_<C>, whose displayed value is the
   # PULL theta (scale = kappa^theta); free mode -> the per-channel qcd_norm.
-  QLNN=0
+  QLNN=0; QRG=""; QGL=""
   if [ -f "$SDCD/qcd_lnn_kappas.txt" ]; then
     KQTEST=$(awk '$1=="kQcdMu"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
     [ -n "$KQTEST" ] && [ "$KQTEST" != "0" ] && QLNN=1
+    # per-group residual lnN (2026-10-30): the bin's own qcd_rate_<F>_<C>_<g>
+    QRG=$(awk '$1=="qcdRateGroups"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
+    [ -n "$QRG" ] && QGL=$(awk '$1=="qcdGroups"{print $2}' "$SDCD/qcd_lnn_kappas.txt")
   fi
   for B in lab fb; do
     fd="$SFITS/simfit_$B/fitDiagnostics_simfit_${B}.root"
@@ -438,6 +456,7 @@ simfit_postfit_all() {  # postfit data/MC per channel of the fit ($SFLAVS), both
           R="${C}_${B}_y${iy}"
           CH="${F}_${R}"
           QN="qcd_norm_${CH}"; [ "$QLNN" -eq 1 ] && QN="qcd_rate_${F}_${C}"
+          [ "$QLNN" -eq 1 ] && [ -n "$QRG" ] && QN="${QN}_$(group_of_bin "$B" "$iy" "$QGL")"
           # info box: this bin's POI, the global r_Z (shown as DY norm), the QCD
           # param (lnN/abcdy mode: the shared residual nuisance -> value shown is
           # the PULL); ndf uses the ~3 params that shape this channel.
@@ -506,13 +525,13 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
       return
     fi
     if [ "$AWMU" != none ] && [ ! -f "$AWMU" ]; then
-      if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/$WINNAME" ]; then
-        AWMU="$PO_PLOTS/$WINNAME"; echo "[extract-only] no muon W input copy in $SWORK -> $AWMU"
+      if [ -n "$PO_PLOTS" ] && [ -f "$PO_IN_MU/$WINNAME" ]; then
+        AWMU="$PO_IN_MU/$WINNAME"; echo "[extract-only] no muon W input copy in $SWORK -> $AWMU"
       else echo "[ERROR] --extract-only: no muon W input (neither a work-dir copy nor the plots dir)"; return; fi
     fi
     if [ "$AWEL" != none ] && [ ! -f "$AWEL" ]; then
-      if [ -n "$PO_PLOTS" ] && [ -f "$PO_PLOTS/Elec/$WINNAME" ]; then
-        AWEL="$PO_PLOTS/Elec/$WINNAME"; echo "[extract-only] no electron W input copy in $SWORK -> $AWEL"
+      if [ -n "$PO_PLOTS" ] && [ -f "$PO_IN_EL/$WINNAME" ]; then
+        AWEL="$PO_IN_EL/$WINNAME"; echo "[extract-only] no electron W input copy in $SWORK -> $AWEL"
       else echo "[ERROR] --extract-only: no electron W input (neither a work-dir copy nor the plots dir)"; return; fi
     fi
     mkdir -p "$SSUMM"
@@ -522,8 +541,8 @@ run_simfit_set() {  # $1 = the flavours in ONE likelihood: "mu ele" (grand) | mu
     return
   fi
 
-  WMU_SRC="$PO_PLOTS/$WINNAME";      ZMU_SRC="$PO_PLOTS/combine_input_Z.root"
-  WEL_SRC="$PO_PLOTS/Elec/$WINNAME"; ZEL_SRC="$PO_PLOTS/Elec/combine_input_Z.root"
+  WMU_SRC="$PO_IN_MU/$WINNAME"; ZMU_SRC="$PO_IN_MU/combine_input_Z.root"
+  WEL_SRC="$PO_IN_EL/$WINNAME"; ZEL_SRC="$PO_IN_EL/combine_input_Z.root"
   miss=0
   for pair in "$AWMU|$WMU_SRC" "$AZMU|$ZMU_SRC" "$AWEL|$WEL_SRC" "$AZEL|$ZEL_SRC"; do
     [ "${pair%%|*}" = none ] && continue          # flavour not in this fit

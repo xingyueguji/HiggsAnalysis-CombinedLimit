@@ -28,6 +28,14 @@
 //     template), qcd_model = "abcdy", the summary gets the group scales +
 //     qcd_abcd_mult_<F>_<C>_<g>, and the Asimov closure covers every group
 //     scale. kQcdMu/kQcdEle then hold the REDUCED kappas.
+//     Since 2026-10-30 (user decision) the residual lnN is ONE PER (flavour,
+//     charge, group), qcd_rate_<F>_<C>_<g>, with a kappa per (flavour, group):
+//     the trailing `qcdRateKappas` argument (13th; the sidecar's qcdRateGroups
+//     line, "mu_fwd=1.44,...,ele_cen=1.19") turns that on. AbcdScale then uses
+//     the group's own theta and kappa, the pulls are reported per group
+//     (qcd_rate_<F>_<C>_<g>_theta rows) and join the Asimov closure. Cards
+//     without per-group rows (QCD_RATE_SPLIT=charge, every fit before
+//     2026-10-30) read exactly as before.
 //     An empty/absent qcdMode falls back to the kappa-based inference
 //     (legacy sidecars): kQcd > 1 -> lnN, = 0 -> free.
 //   qcdMode = "abcd" (y-inclusive in-fit ABCD, 2026-08-23..10-26) and
@@ -137,6 +145,14 @@ namespace {
 
 struct Par { bool ok; double v, e; };
 
+// per-group residual kappas (2026-10-30): "<flav>_<group>" -> kappa, filled from
+// the qcdRateKappas argument; empty = one shared qcd_rate_<F>_<C> per charge
+std::map<std::string, double> gGroupKappa;
+double GroupKappa(const char *flav, const char *grp) {
+  const auto it = gGroupKappa.find(std::string(flav) + "_" + grp);
+  return (it != gGroupKappa.end()) ? it->second : 0.0;
+}
+
 Par GetPar(const RooFitResult *fr, const TString &name) {
   Par p; p.ok = false; p.v = p.e = 0.0;
   if (!fr) return p;
@@ -171,8 +187,10 @@ Par LnNScale(const RooFitResult *fr, double kappa, const TString &name) {
 // postfit_incl.C reads the postfit shapes from fitDiagnostics whenever shape
 // nuisances are present, so nothing downstream relies on M alone.
 // grp = the rapidity group -> the scales of that group, qcd_s{B,C,D}_<F>_<C>_<grp>;
-// the residual nuisance qcd_rate_<F>_<C> is shared by the groups. (grp = ""
-// gives the names of the removed y-inclusive abcd mode.)
+// the residual nuisance is the group's own qcd_rate_<F>_<C>_<grp> (kappa from
+// gGroupKappa) when the fit has it (2026-10-30), else qcd_rate_<F>_<C> shared by
+// the groups with the passed kappa. (grp = "" gives the names of the removed
+// y-inclusive abcd mode.)
 Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char *chg, const char *grp = "") {
   Par p; p.ok = false; p.v = 1.0; p.e = 0.0;
   if (!fr) return p;
@@ -183,8 +201,12 @@ Par AbcdScale(const RooFitResult *fr, double kappa, const char *flav, const char
   const Par sB = GetPar(fr, nB), sC = GetPar(fr, nC), sD = GetPar(fr, nD);
   if (!sB.ok || !sC.ok || !sD.ok || sB.v <= 0.0 || sC.v <= 0.0 || sD.v <= 0.0)
     return p;
+  TString nT = TString::Format("qcd_rate_%s_%s", flav, chg);
+  if (grp && grp[0] && GroupKappa(flav, grp) > 1.0 && GetPar(fr, nT + "_" + grp).ok) {
+    nT += TString("_") + grp; // the group's own residual (2026-10-30)
+    kappa = GroupKappa(flav, grp);
+  }
   const bool hasK = (kappa > 1.0);
-  const TString nT = TString::Format("qcd_rate_%s_%s", flav, chg);
   Par th; th.ok = false; th.v = 0.0; th.e = 0.0;
   if (hasK) th = GetPar(fr, nT); // absent -> theta 0 with no error contribution
   p.ok = true;
@@ -308,10 +330,26 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
                        const char *flavours = "mu,ele", // lepton flavours IN the fit
                                                         //  (2026-09-22: "mu" | "ele" = flavfit)
                        const char *outTag = "comb",     // output-file prefix: comb | simfit_mu | simfit_ele
-                       const char *qcdGroups = "")      // abcdy only (2026-10-19): the sidecar qcdGroups
+                       const char *qcdGroups = "",      // abcdy only (2026-10-19): the sidecar qcdGroups
                                                         //  token, "lab:fwd=10,11/bwd=0,1/...;fb:..."
+                       const char *qcdRateKappas = "")  // abcdy, per-group residual (2026-10-30): the
+                                                        //  sidecar qcdRateGroups token, "mu_fwd=1.44,..."
 {
   gSystem->mkdir(outDir, kTRUE);
+  gGroupKappa.clear();
+  {
+    TString s(qcdRateKappas);
+    TObjArray *toks = s.Tokenize(",");
+    for (int i = 0; i < toks->GetEntries(); ++i) {
+      const TString t = ((TObjString *)toks->At(i))->GetString();
+      const Ssiz_t eq = t.Index("=");
+      if (eq <= 0) continue;
+      gGroupKappa[std::string(TString(t(0, eq)).Data())] = TString(t(eq + 1, t.Length() - eq - 1)).Atof();
+    }
+    delete toks;
+    if (!gGroupKappa.empty())
+      std::cout << "[extract-simfit] residual lnN per rapidity group: " << qcdRateKappas << "\n";
+  }
 
   // ---- which lepton flavours this fit contains ([0] = mu, [1] = ele) --------
   bool useFl[2] = {false, false};
@@ -564,6 +602,19 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         if (kap <= 1.0) continue;
         for (int ic2 = 0; ic2 < 2; ++ic2) {
           const TString nn = TString::Format("qcd_rate_%s_%s", flav, charges[ic2]);
+          // per-group residual rows (2026-10-30): one pull per rapidity group
+          if (isAbcdY && !gGroupKappa.empty()) {
+            for (const TString &gname : grpNames[ib]) {
+              const TString ng = nn + "_" + gname;
+              const double kg = GroupKappa(flav, gname.Data());
+              Par th = GetPar(fr, ng);
+              if (!th.ok || kg <= 1.0) { std::cerr << "[extract-simfit] WARN nuisance " << ng << " not in fit_s\n"; continue; }
+              std::cout << "[extract-simfit] " << fitName << ": " << ng << " pull = "
+                        << Form("%.3f +/- %.3f (kappa %.2f, scale %.4f)", th.v, th.e, kg, std::pow(kg, th.v)) << "\n";
+              scsv << fitName << "," << ng << "_theta," << th.v << "," << th.e << ",,,\n";
+            }
+            continue;
+          }
           Par th = GetPar(fr, nn);
           if (!th.ok) { std::cerr << "[extract-simfit] WARN nuisance " << nn << " not in fit_s\n"; continue; }
           std::cout << "[extract-simfit] " << fitName << ": " << nn << " pull = "
@@ -960,6 +1011,20 @@ void extract_pO_simfit(const char *fitsDir,  // <workdir>/fits (simfit_lab/, sim
         scsv << fitName << "_asimov," << nuisN[in2] << "_theta," << t.v << "," << t.e << ",,,\n";
         if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = nuisN[in2]; }
       }
+      // the per-group residual rows (2026-10-30), when the cards have them
+      if (isAbcdY && !gGroupKappa.empty())
+        for (int ifl = 0; ifl < 2; ++ifl) {
+          if (!useFl[ifl]) continue;
+          for (int ic2 = 0; ic2 < 2; ++ic2)
+            for (const TString &gname : grpNames[ib]) {
+              const TString ng = TString::Format("qcd_rate_%s_%s_%s", (ifl == 0) ? "mu" : "ele", charges[ic2],
+                                                 gname.Data());
+              Par t = GetPar(fra, ng);
+              if (!t.ok) continue;
+              scsv << fitName << "_asimov," << ng << "_theta," << t.v << "," << t.e << ",,,\n";
+              if (std::fabs(t.v) > worst) { worst = std::fabs(t.v); worstName = ng; }
+            }
+        }
       // LHE shape nuisances (2026-09-07): the prefit Asimov is generated at
       // theta = 0, so every shape nuisance must come back at 0 too
       for (size_t il = 0; il < lheNames.size(); ++il) {

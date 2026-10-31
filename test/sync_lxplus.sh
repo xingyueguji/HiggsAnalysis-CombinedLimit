@@ -102,8 +102,10 @@ upload_inputs() {
   echo "== upload structured Combine inputs -> $LX:$ANA_LX/plotting/ =="
   local missing=0
   # required: the PF-MET W inputs + the Z inputs
-  for f in plots/combine_input_W.root plots/combine_input_Z.root \
-           plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root; do
+  # plots/combine_inputs/{muon,electron}/ = the analysis repo's plotting/plot_paths.h
+  # (until 2026-10-29 plots/ and plots/Elec/)
+  for f in plots/combine_inputs/muon/combine_input_W.root plots/combine_inputs/muon/combine_input_Z.root \
+           plots/combine_inputs/electron/combine_input_W.root plots/combine_inputs/electron/combine_input_Z.root; do
     [ -f "$ANA_LOCAL/plotting/$f" ] || { echo "[MISS] $ANA_LOCAL/plotting/$f"; missing=1; }
   done
   if [ "$missing" -eq 1 ]; then
@@ -113,8 +115,10 @@ upload_inputs() {
   # optional: the lepton-pT discriminant (m_T > 40, 2026-07-30). Uploaded when
   # present; a missing file is only a note, not an error. (The no-m_T leppt and
   # met_mt40 inputs were removed 2026-10-26.)
-  SEND="plots/combine_input_W.root plots/combine_input_Z.root plots/Elec/combine_input_W.root plots/Elec/combine_input_Z.root"
-  for f in plots/combine_input_W_leppt_mt40.root plots/Elec/combine_input_W_leppt_mt40.root; do
+  SEND="plots/combine_inputs/muon/combine_input_W.root plots/combine_inputs/muon/combine_input_Z.root"
+  SEND="$SEND plots/combine_inputs/electron/combine_input_W.root plots/combine_inputs/electron/combine_input_Z.root"
+  for f in plots/combine_inputs/muon/combine_input_W_leppt_mt40.root \
+           plots/combine_inputs/electron/combine_input_W_leppt_mt40.root; do
     if [ -f "$ANA_LOCAL/plotting/$f" ]; then SEND="$SEND $f"
     else echo "[note] optional variant not built (skipped): $f"; fi
   done
